@@ -2,8 +2,9 @@ package cache
 
 import (
 	"fmt"
-	"github.com/patrickmn/go-cache"
 	"time"
+
+	"github.com/patrickmn/go-cache"
 )
 
 const cleanupInterval = 10 * time.Minute

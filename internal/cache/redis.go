@@ -2,9 +2,10 @@ package cache
 
 import (
 	"context"
+	"time"
+
 	"github.com/go-redis/redis/v8"
 	"github.com/pkg/errors"
-	"time"
 )
 
 type RedisConfig struct {

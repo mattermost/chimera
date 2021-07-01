@@ -2,6 +2,7 @@ package api
 
 import (
 	"fmt"
+
 	"github.com/mattermost/chimera/internal/oauthapps"
 	"github.com/mattermost/chimera/internal/providers"
 	"github.com/pkg/errors"

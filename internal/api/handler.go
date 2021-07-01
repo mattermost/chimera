@@ -3,9 +3,10 @@ package api
 import (
 	"context"
 	"fmt"
-	"github.com/mattermost/chimera/internal/cache"
 	"net/http"
 	"net/url"
+
+	"github.com/mattermost/chimera/internal/cache"
 
 	"github.com/gorilla/mux"
 	"github.com/mattermost/chimera/internal/providers"

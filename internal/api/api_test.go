@@ -3,14 +3,15 @@ package api
 import (
 	"context"
 	"fmt"
-	"github.com/mattermost/chimera/internal/cache"
-	"github.com/mattermost/chimera/internal/oauthapps"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/mattermost/chimera/internal/cache"
+	"github.com/mattermost/chimera/internal/oauthapps"
 
 	"github.com/mattermost/chimera/internal/providers"
 	"github.com/sirupsen/logrus"

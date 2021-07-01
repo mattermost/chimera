@@ -1,11 +1,12 @@
 package api
 
 import (
+	"testing"
+
 	"github.com/mattermost/chimera/internal/oauthapps"
 	"github.com/mattermost/chimera/internal/providers"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"testing"
 )
 
 func TestOAuthAppsFromConfig(t *testing.T) {

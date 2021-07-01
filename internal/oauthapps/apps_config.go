@@ -3,10 +3,11 @@ package oauthapps
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/mattermost/chimera/internal/providers"
-	"github.com/pkg/errors"
 	"io/ioutil"
 	"net/url"
+
+	"github.com/mattermost/chimera/internal/providers"
+	"github.com/pkg/errors"
 )
 
 func NewAppsConfigFromFile(path string) (AppsConfig, error) {

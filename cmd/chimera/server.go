@@ -3,13 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"github.com/mattermost/chimera/internal/api"
-	"github.com/mattermost/chimera/internal/cache"
-	"github.com/mattermost/chimera/internal/oauthapps"
-	"github.com/mattermost/chimera/internal/util"
-	"github.com/pkg/errors"
-	"github.com/sirupsen/logrus"
-	"github.com/spf13/cobra"
 	"log"
 	"net/http"
 	"os"
@@ -17,6 +10,14 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/mattermost/chimera/internal/api"
+	"github.com/mattermost/chimera/internal/cache"
+	"github.com/mattermost/chimera/internal/oauthapps"
+	"github.com/mattermost/chimera/internal/util"
+	"github.com/pkg/errors"
+	"github.com/sirupsen/logrus"
+	"github.com/spf13/cobra"
 )
 
 func newServeCmd() *cobra.Command {
