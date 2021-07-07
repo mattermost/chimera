@@ -242,8 +242,6 @@ func Test_HandleExchangeToken(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "abcd-access-token", token.AccessToken)
 
-	// TODO: invalid app etc
-
 	t.Run("return 400 if client ID and secret not provided", func(t *testing.T) {
 		oauthConfig := oauth2.Config{
 			ClientID:     "",
