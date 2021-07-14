@@ -161,14 +161,14 @@ func (h *Handler) handleTokenExchange(c *Context, w http.ResponseWriter, r *http
 		code = r.URL.Query().Get("code")
 	}
 	if len(code) == 0 {
-		c.Logger.Errorf("Missing authorization code")
+		c.Logger.Error("Missing authorization code")
 		http.Error(w, "missing authorization code", http.StatusBadRequest)
 		return
 	}
 
 	token, err := conf.Exchange(context.Background(), code)
 	if err != nil {
-		c.Logger.WithError(err).Errorf("Failed to exchange token")
+		c.Logger.WithError(err).Error("Failed to exchange token")
 		http.Error(w, "failed to exchange token", http.StatusBadGateway)
 		return
 	}
