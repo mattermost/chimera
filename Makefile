@@ -1,4 +1,7 @@
 
+run-server: ## Starts Chimera server
+	go run ./cmd/chimera server
+
 
 ## Help documentation à la https://marmelab.com/blog/2016/02/29/auto-documented-makefile.html
 help:
