@@ -1,0 +1,108 @@
+version: 2.1
+executors:
+  default:
+    docker:
+      - image: circleci/golang:1.16
+
+aliases:
+  - &restore_cache
+    restore_cache:
+      key: go-mod-v1-{{ checksum "go.sum" }}
+  - &save_cache
+    save_cache:
+      key: go-mod-v1-{{ checksum "go.sum" }}
+      paths:
+        - "/go/pkg/mod"
+
+jobs:
+  check-style:
+    executor:
+      name: default
+    steps:
+      - checkout
+      - *restore_cache
+      - run: make check-style
+      - *save_cache
+
+  test:
+    executor:
+      name: default
+    steps:
+      - checkout
+      - *restore_cache
+      - run: make test
+      - *save_cache
+
+  push-docker-pr:
+    executor:
+      name: default
+    steps:
+      - checkout
+      - setup_remote_docker
+      - run: make build-image
+      - run: ./scripts/push-docker-pr.sh
+      - run:
+          name: Re-run Docker Push if fail
+          command: |
+            sleep 20
+            ./scripts/push-docker-pr.sh
+          when: on_fail
+
+  push-docker:
+    executor:
+      name: default
+    steps:
+      - checkout
+      - setup_remote_docker
+      - run: make build-image
+      - run: ./scripts/push-docker.sh
+      - run:
+          name: Re-run Docker Push if fail
+          command: |
+            sleep 20
+            ./scripts/push-docker.sh
+          when: on_fail
+
+workflows:
+  version: 2
+  pr-build:
+    jobs:
+      - check-style
+      - test
+      - push-docker-pr:
+          context: matterbuild-docker
+          requires:
+            - check-style
+            - test
+  master-build:
+    jobs:
+      - test:
+          filters:
+            branches:
+              only:
+                - main
+      - push-docker:
+          context: matterbuild-docker
+          requires:
+            - test
+          filters:
+            branches:
+              only:
+                - main
+  tag-builds:
+    jobs:
+      - test:
+          filters:
+            tags:
+              only: /^v.*/
+            branches:
+              ignore: /.*/
+      - push-docker:
+          context: matterbuild-docker
+          requires:
+            - test
+          filters:
+            tags:
+              only: /^v.*/
+            branches:
+              ignore: /.*/
