@@ -12,6 +12,8 @@ BUILD_TIME := $(shell date -u +%Y%m%d.%H%M%S)
 BUILD_HASH := $(shell git rev-parse HEAD)
 LDFLAGS += "-X github.com/mattermost/chimera.BuildHash=$(BUILD_HASH)"
 
+################################################################################
+
 run-server: ## Starts Chimera server
 	go run ./cmd/chimera server
 
@@ -54,7 +56,7 @@ govet: ## Runs govet against all packages.
 	$(GO) vet ./...
 	@echo Govet success
 
-goimports: ## Runs goimports against all packages.
+goimports: get-goimports ## Runs goimports against all packages.
 	@echo Checking imports are sorted
 	@for package in $(PACKAGES); do \
 		echo "Checking "$$package; \
@@ -81,6 +83,10 @@ format: ## Formats code with go fmt and goimports
 			goimports -w $$files; \
 		fi; \
 	done
+
+
+get-goimports: ## Install goimports
+	$(GO) install golang.org/x/tools/cmd/goimports
 
 ## Help documentation à la https://marmelab.com/blog/2016/02/29/auto-documented-makefile.html
 help:
