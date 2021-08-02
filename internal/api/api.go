@@ -14,6 +14,11 @@ func RegisterAPI(context *Context, oauthApps map[string]OAuthApp, cache StateCac
 
 	rootRouter.Handle("/metrics", promhttp.Handler())
 
+	rootRouter.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("Ok"))
+	})
+
 	v1Router := rootRouter.PathPrefix("/v1").Subrouter()
 
 	handler := NewHandler(oauthApps, cache)
