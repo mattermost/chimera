@@ -40,12 +40,21 @@ func newServeCmd() *cobra.Command {
 	cmd.Flags().String("redis-address", "localhost:6379", "Redis server address (required if cache-driver is redis).")
 	cmd.Flags().String("redis-password", "", "Redis server password.")
 	cmd.Flags().Int("redis-database", 0, "Redis database.")
+	cmd.Flags().String("log-level", "info", "Log level used by Chimera.")
 
 	return cmd
 }
 
 func runServer(opts ServerOptions) error {
 	instance := util.NewID()
+
+	logLevel, err := logrus.ParseLevel(opts.LogLevel)
+	if err != nil {
+		logrus.WithError(err).Errorf("Failed to set log level to %q, defaulting to info", opts.LogLevel)
+		logLevel = logrus.InfoLevel
+	}
+	logrus.SetLevel(logLevel)
+
 	logger := logrus.WithField("instance", instance)
 	logger.Logger.SetFormatter(&logrus.TextFormatter{
 		FullTimestamp: true,

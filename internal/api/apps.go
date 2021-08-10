@@ -10,9 +10,9 @@ import (
 )
 
 const (
-	zoomRedirectFormat      = "%s/zoom/%s/oauth/complete"
-	gitLabRedirectFormat    = "%s/gitlab/%s/oauth/complete"
-	microsoftRedirectFormat = "%s/microsoft/%s/oauth/complete"
+	zoomRedirectFormat      = "%s/v1/zoom/%s/oauth/complete"
+	gitLabRedirectFormat    = "%s/v1/gitlab/%s/oauth/complete"
+	microsoftRedirectFormat = "%s/v1/microsoft/%s/oauth/complete"
 )
 
 type OAuthApp struct {
