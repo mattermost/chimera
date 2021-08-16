@@ -40,18 +40,21 @@ func TestOAuthAppsFromConfig(t *testing.T) {
 	assertConfigMatchApp(t, config[0], githubApp)
 	_, ok := githubApp.OAuthURLs.(providers.GithubOAuthProvider)
 	require.True(t, ok)
+	assert.Equal(t, "", githubApp.RedirectURL())
 
 	zoomApp, found := oauthApps["plugin-zoom"]
 	require.True(t, found)
 	assertConfigMatchApp(t, config[1], zoomApp)
 	_, ok = zoomApp.OAuthURLs.(providers.ZoomOAuthProvider)
 	require.True(t, ok)
+	assert.Equal(t, "http://localhost:1234/v1/zoom/plugin-zoom/oauth/complete", zoomApp.RedirectURL())
 
 	gitlabApp, found := oauthApps["plugin-gitlab"]
 	require.True(t, found)
 	assertConfigMatchApp(t, config[2], gitlabApp)
 	_, ok = gitlabApp.OAuthURLs.(providers.GitLabOAuthProvider)
 	require.True(t, ok)
+	assert.Equal(t, "http://localhost:1234/v1/gitlab/plugin-gitlab/oauth/complete", gitlabApp.RedirectURL())
 }
 
 func assertConfigMatchApp(t *testing.T, config oauthapps.OAuthAppConfig, app OAuthApp) {

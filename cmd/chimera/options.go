@@ -12,6 +12,7 @@ type ServerOptions struct {
 	RedisAddress  string `mapstructure:"redis-address"`
 	RedisPassword string `mapstructure:"redis-password"`
 	RedisDatabase int    `mapstructure:"redis-database"`
+	LogLevel      string `mapstructure:"log-level"`
 }
 
 func NewFlagOptions() ServerOptions {

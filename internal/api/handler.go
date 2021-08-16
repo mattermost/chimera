@@ -42,6 +42,9 @@ func (h *Handler) handleAuthorize(c *Context, w http.ResponseWriter, r *http.Req
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
+	c.Logger = c.Logger.WithField("provider", app.Provider).
+		WithField("app", app.Identifier)
+	c.Logger.Infof("Handling authorization")
 
 	redirectURI := r.URL.Query().Get("redirect_uri")
 	if redirectURI == "" {
@@ -84,12 +87,13 @@ func (h *Handler) handleAuthorize(c *Context, w http.ResponseWriter, r *http.Req
 	conf := h.makeOAuthConfig(scope, app)
 
 	authURL := conf.AuthCodeURL(extendedState, oauth2.AccessTypeOffline)
+	c.Logger.Infof("Redirecting to auth URL")
 
 	http.Redirect(w, r, authURL, http.StatusFound)
 }
 
 func (h *Handler) handleAuthorizationCallback(c *Context, w http.ResponseWriter, r *http.Request) {
-	c.Logger.Debug("Handling authorization callback")
+	c.Logger.Info("Handling authorization callback")
 
 	state := r.URL.Query().Get("state")
 
@@ -118,6 +122,7 @@ func (h *Handler) handleAuthorizationCallback(c *Context, w http.ResponseWriter,
 	query.Set("state", originalState)
 
 	redirectURI.RawQuery = query.Encode()
+	c.Logger.Info("Redirecting authorization callback")
 
 	http.Redirect(w, r, redirectURI.String(), http.StatusFound)
 }
@@ -128,6 +133,9 @@ func (h *Handler) handleTokenExchange(c *Context, w http.ResponseWriter, r *http
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
+	c.Logger = c.Logger.WithField("provider", app.Provider).
+		WithField("app", app.Identifier)
+	c.Logger.Infof("Handling token exchange")
 
 	clientID, clientSecret, ok := r.BasicAuth()
 	if !ok {
@@ -172,6 +180,7 @@ func (h *Handler) handleTokenExchange(c *Context, w http.ResponseWriter, r *http
 		http.Error(w, "failed to exchange token", http.StatusBadGateway)
 		return
 	}
+	c.Logger.Info("Responding with access token")
 
 	writeJSON(w, token, &Context{Logger: logrus.New()})
 }
