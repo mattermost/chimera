@@ -3,7 +3,36 @@
 Chimera is an OAuth2 proxy to external OAuth providers. 
 It works with predefined applications by adding credentials to the requests and proxying them to OAuth providers.
 
-## OAuth applications configuration
+
+## Chimera at Mattermost
+
+Although there is nothing exclusive for Mattermost use case, Chimera acts as an OAuth2 proxy for some plugins to make it easier for Cloud customers to connect plugins running on their instances.
+
+Thanks to Chimera, users can skip registration of their own OAuth2 applications on the provider side (such as GitHub or Zoom) and use applications pre-created by Mattermost company. This allows them to connect their plugins much easier ripping benefits of awesome integrations even faster :rocket:
+
+### Plugins support
+
+Current support for Chimera in Mattermost plugins.
+
+| Plugin | Chimera Support Status |
+|--------|--------|-------|
+| [GitHub Plugin](https://github.com/mattermost/mattermost-plugin-github) | In Progress |
+| [GitLab Plugin](https://github.com/mattermost/mattermost-plugin-gitlab) | In Progress |
+| [Zoom Plugin](https://github.com/mattermost/mattermost-plugin-zoom) | In Progress |
+
+### Using Chimera on managed instance
+
+[Mattermost Cloud managed installations](https://mattermost.com/pricing-cloud/) are preconfigured with Chimera. To use it with supported plugin enable **Use Preregistered OAuth Application** option in the plugin settings.
+
+
+### On Premise instances
+
+It is possible to use Chimera with on-premise instances but it requires a lot configuration and **is not officially supported**.
+
+
+## Configuration
+
+### OAuth applications configuration
 
 To use Chimera, it needs to be configured with pre-registered OAuth applications on provider side.
 
@@ -21,3 +50,11 @@ The example shows configuration with GitHub OAuth2 application:
 }
 ```
 
+### Configuring with Mattermost Instance
+
+To configure Mattermost instance to use specific Chimera instance set Chimera URL in the following environment variable for the Mattermost server:
+```
+export MM_PLUGINSETTINGS_CHIMERAOAUTHPROXYURL=https://your-chimera.com
+```
+
+[Mattermost Cloud managed installations](https://mattermost.com/pricing-cloud/) are preconfigured with Chimera run and managed by Mattermost, therefor no configuration is needed.
