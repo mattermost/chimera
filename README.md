@@ -27,7 +27,7 @@ Current support for Chimera in Mattermost plugins.
 
 ### On Premise instances
 
-It is possible to use Chimera with on-premise instances but it requires a lot configuration and **is not officially supported**.
+It is possible to use Chimera with on-premise instances but it requires a lot configuration and **is not officially supported** yet.
 
 
 ## Configuration
