@@ -3,10 +3,11 @@ package api
 import (
 	"context"
 	"fmt"
+	"github.com/mattermost/chimera/internal/cache"
+	"github.com/pkg/errors"
+	"html/template"
 	"net/http"
 	"net/url"
-
-	"github.com/mattermost/chimera/internal/cache"
 
 	"github.com/gorilla/mux"
 	"github.com/mattermost/chimera/internal/providers"
@@ -19,16 +20,25 @@ const (
 	stateExtensionLength = 16
 )
 
-func NewHandler(appsRegistry map[string]OAuthApp, cache StateCache) *Handler {
-	return &Handler{
-		stateCache:   cache,
-		appsRegistry: appsRegistry,
+func NewHandler(appsRegistry map[string]OAuthApp, cache StateCache, baseURL, formPath string) (*Handler, error) {
+	confirmForm, err := template.ParseFiles(formPath)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to parse confirmation form template")
 	}
+
+	return &Handler{
+		stateCache:               cache,
+		appsRegistry:             appsRegistry,
+		baseURL:                  baseURL,
+		confirmationFromTemplate: confirmForm,
+	}, nil
 }
 
 type Handler struct {
-	stateCache   StateCache
-	appsRegistry map[string]OAuthApp
+	stateCache               StateCache
+	appsRegistry             map[string]OAuthApp
+	baseURL                  string
+	confirmationFromTemplate *template.Template
 }
 
 type StateCache interface {
@@ -116,15 +126,64 @@ func (h *Handler) handleAuthorizationCallback(c *Context, w http.ResponseWriter,
 		return
 	}
 
+	// Update redirect URI with params returned from OAuth provider such as `authorization_code`.
 	originalState := state[:len(state)-stateExtensionLength]
-
 	query := r.URL.Query()
 	query.Set("state", originalState)
-
 	redirectURI.RawQuery = query.Encode()
-	c.Logger.Info("Redirecting authorization callback")
 
-	http.Redirect(w, r, redirectURI.String(), http.StatusFound)
+	redirectURIStr := redirectURI.String()
+
+	err = h.stateCache.SetRedirectURI(state, redirectURIStr)
+	if err != nil {
+		c.Logger.Error("Failed to update redirect URL in cache")
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	c.Logger.Info("Redirecting authorization callback to confirmation")
+	http.Redirect(w, r, fmt.Sprintf("%s/v1/auth/chimera/confirm?state=%s", h.baseURL, state), http.StatusFound)
+}
+
+func (h *Handler) handleConfirmAuthorization(c *Context, w http.ResponseWriter, r *http.Request) {
+	c.Logger.Info("Handling request for confirmation of Chimera authZ")
+
+	state := r.URL.Query().Get("state")
+
+	redirectURIRaw, err := h.stateCache.GetRedirectURI(state)
+	if err != nil {
+		if err == cache.ErrNotFound {
+			c.Logger.Error("State provided to webhook handler not found")
+			w.WriteHeader(http.StatusBadRequest)
+		} else {
+			c.Logger.Error("Failed to get state from cache")
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+		return
+	}
+
+	// Strip URL query for cleaner display
+	strippedURL, err := stripURLQuery(redirectURIRaw)
+	if err != nil {
+		c.Logger.Error("Failed to strip query from redirect URL")
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	data := struct {
+		RedirectURL     string
+		FullRedirectURL string
+	}{
+		RedirectURL:     strippedURL,
+		FullRedirectURL: redirectURIRaw,
+	}
+
+	c.Logger.Info("Displaying authZ confirmation from")
+	w.WriteHeader(http.StatusOK)
+	err = h.confirmationFromTemplate.Execute(w, data)
+	if err != nil {
+		c.Logger.WithError(err).Error("Failed to send confirmation from")
+	}
 }
 
 func (h *Handler) handleTokenExchange(c *Context, w http.ResponseWriter, r *http.Request) {
@@ -223,4 +282,14 @@ func (h *Handler) makeOAuthConfig(scope []string, app OAuthApp) *oauth2.Config {
 		Endpoint:     app.OAuthURLs.Endpoint(),
 		RedirectURL:  app.OAuthURLs.RedirectURL(),
 	}
+}
+
+func stripURLQuery(rawURL string) (string, error) {
+	redirectURI, err := url.Parse(rawURL)
+	if err != nil {
+		return "", err
+	}
+	redirectURI.RawQuery = ""
+
+	return redirectURI.String(), nil
 }

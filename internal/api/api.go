@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"github.com/pkg/errors"
 	"net/http"
 
 	"github.com/gorilla/mux"
@@ -9,7 +10,7 @@ import (
 )
 
 // RegisterAPI registers the API endpoints on the given router.
-func RegisterAPI(context *Context, oauthApps map[string]OAuthApp, cache StateCache) *mux.Router {
+func RegisterAPI(context *Context, oauthApps map[string]OAuthApp, cache StateCache, baseURL, confirmationTemplatePath string) (*mux.Router, error) {
 	rootRouter := mux.NewRouter()
 
 	rootRouter.Handle("/metrics", promhttp.Handler())
@@ -21,14 +22,19 @@ func RegisterAPI(context *Context, oauthApps map[string]OAuthApp, cache StateCac
 
 	v1Router := rootRouter.PathPrefix("/v1").Subrouter()
 
-	handler := NewHandler(oauthApps, cache)
+	handler, err := NewHandler(oauthApps, cache, baseURL, confirmationTemplatePath)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to create handler")
+	}
+
+	v1Router.Handle("/auth/chimera/confirm", addCtx(context.Clone(), handler.handleConfirmAuthorization))
 
 	oauthRouter := v1Router.PathPrefix("/{provider}/{app}").Subrouter()
 	oauthRouter.Handle("/oauth/authorize", addCtx(context.Clone(), handler.handleAuthorize)).Methods(http.MethodGet)
 	oauthRouter.Handle("/oauth/complete", addCtx(context.Clone(), handler.handleAuthorizationCallback))
 	oauthRouter.Handle("/oauth/token", addCtx(context.Clone(), handler.handleTokenExchange)).Methods(http.MethodPost)
 
-	return rootRouter
+	return rootRouter, nil
 }
 
 func writeJSON(w http.ResponseWriter, v interface{}, c *Context) {
