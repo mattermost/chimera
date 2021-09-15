@@ -14,7 +14,8 @@ import (
 )
 
 func TestAPI_HealthCheck(t *testing.T) {
-	router := RegisterAPI(&Context{Logger: logrus.New()}, map[string]OAuthApp{}, cache.NewInMemoryCache(10*time.Minute))
+	router, err := RegisterAPI(&Context{Logger: logrus.New()}, map[string]OAuthApp{}, cache.NewInMemoryCache(10*time.Minute), "", "testdata/test-form.html")
+	require.NoError(t, err)
 	server := httptest.NewServer(router)
 	defer server.Close()
 

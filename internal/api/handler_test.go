@@ -39,7 +39,8 @@ func Test_HandleAuthorize(t *testing.T) {
 		},
 	}
 
-	router := RegisterAPI(&Context{Logger: logrus.New()}, oauthApps, cache.NewInMemoryCache(10*time.Minute))
+	router, err := RegisterAPI(&Context{Logger: logrus.New()}, oauthApps, cache.NewInMemoryCache(10*time.Minute), "https://chimera", "testdata/test-form.html")
+	require.NoError(t, err)
 	server := httptest.NewServer(router)
 	defer server.Close()
 
@@ -132,7 +133,10 @@ func Test_HandleAuthorizationCallback(t *testing.T) {
 		},
 	}
 
-	router := RegisterAPI(&Context{Logger: logrus.New()}, oauthApps, cache.NewInMemoryCache(10*time.Minute))
+	cache := cache.NewInMemoryCache(10*time.Minute)
+
+	router, err := RegisterAPI(&Context{Logger: logrus.New()}, oauthApps, cache,"https://chimera", "testdata/test-form.html")
+	require.NoError(t, err)
 	server := httptest.NewServer(router)
 	defer server.Close()
 
@@ -172,7 +176,14 @@ func Test_HandleAuthorizationCallback(t *testing.T) {
 
 	location, err = resp.Location()
 	require.NoError(t, err)
-	assert.Equal(t, "http://my-mm/oauth/complete?authorization_code=abcd-code&state=some-state", location.String())
+	assert.True(t, strings.HasPrefix(location.String(),"https://chimera/v1/auth/chimera/confirm?state=some-state"))
+
+	redirectURIRaw, err := cache.GetRedirectURI(location.Query().Get("state"))
+	require.NoError(t, err)
+	redirectURI, err := url.Parse(redirectURIRaw)
+	require.NoError(t, err)
+	assert.Equal(t, "abcd-code", redirectURI.Query().Get("authorization_code"))
+	assert.Equal(t, "some-state", redirectURI.Query().Get("state"))
 
 	t.Run("return 400 when state is invalid", func(t *testing.T) {
 		callbackURL.RawQuery = url.Values{
@@ -185,6 +196,8 @@ func Test_HandleAuthorizationCallback(t *testing.T) {
 		_ = assertRespStatus(t, client, req, http.StatusBadRequest)
 	})
 }
+
+// TODO: test for confirmation page
 
 type mockOAuthURLs struct {
 	tokenURL string
@@ -214,7 +227,8 @@ func Test_HandleExchangeToken(t *testing.T) {
 		},
 	}
 
-	router := RegisterAPI(&Context{Logger: logrus.New()}, oauthApps, cache.NewInMemoryCache(10*time.Minute))
+	router, err := RegisterAPI(&Context{Logger: logrus.New()}, oauthApps, cache.NewInMemoryCache(10*time.Minute), "https://chimera", "testdata/test-form.html")
+	require.NoError(t, err)
 	router.HandleFunc("/mock-token", func(writer http.ResponseWriter, request *http.Request) {
 		writer.Header().Set("Content-Type", "application/json")
 		writer.WriteHeader(http.StatusOK)
