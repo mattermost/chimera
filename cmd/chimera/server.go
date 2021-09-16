@@ -41,6 +41,7 @@ func newServeCmd() *cobra.Command {
 	cmd.Flags().String("redis-password", "", "Redis server password.")
 	cmd.Flags().Int("redis-database", 0, "Redis database.")
 	cmd.Flags().String("confirmation-template-path", "html/confirm-auth-form.html", "HTML template for authorization confirmation form.")
+	cmd.Flags().String("cancel-page-path", "html/cancel-auth.html", "HTML page displayed when canceling authorization.")
 	cmd.Flags().String("log-level", "info", "Log level used by Chimera.")
 
 	return cmd
@@ -84,7 +85,7 @@ func runServer(opts ServerOptions) error {
 		return errors.Wrap(err, "failed to process OAuth apps config")
 	}
 
-	apiRouter, err := api.RegisterAPI(&api.Context{Logger: logger}, apps, stateCache, baseURL, opts.ConfirmationTemplatePath)
+	apiRouter, err := api.RegisterAPI(&api.Context{Logger: logger}, apps, stateCache, baseURL, opts.ConfirmationTemplatePath, opts.CancelPagePath)
 	if err != nil {
 		return errors.Wrap(err, "failed to register API")
 	}

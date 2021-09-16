@@ -33,6 +33,10 @@
         .info {
             padding: 10px;
         }
+        .providerName {
+            font-weight: 700;
+            font-size: 18px;
+        }
         .redirectURL {
             padding: 10px 15px;
             font-weight: 700;
@@ -46,6 +50,10 @@
             width: 100%;
             min-height: 100%;
             padding: 20px;
+        }
+
+        .from {
+            display: inline-block;
         }
 
         #formContent {
@@ -72,8 +80,7 @@
         }
 
         /* FORM TYPOGRAPHY*/
-        input[type=button], input[type=submit], input[type=reset]  {
-            background-color: #1e325c;
+        input[type=button], input[type=submit], input[type=reset], .cancelButton  {
             border: none;
             color: white;
             padding: 15px 80px;
@@ -89,9 +96,22 @@
             margin: 5px 20px 40px 20px;
         }
 
-        input[type=button]:hover, input[type=submit]:hover, input[type=reset]:hover  {
-            background-color: #0a2039;
+        input[type=button]:hover, input[type=submit]:hover, input[type=reset]:hover, .cancelButton  {
             cursor: pointer;
+        }
+
+        .confirmButton {
+            background-color: #1e325c;
+        }
+        .confirmButton:hover {
+            background-color: #0a2039;
+        }
+
+        .cancelButton {
+            background-color: #db0000;
+        }
+        .cancelButton:hover {
+            background-color: #8c1212;
         }
 
         /* OTHERS */
@@ -111,7 +131,7 @@
         <h2 class="active"> Confirm Authorization </h2>
 
         <div class="info">
-            You are about to authorize OAuth application with Chimera.
+            You are about to authorize <a class="providerName" href='{{ .ProviderURL }}'>{{ .ProviderName }}</a> OAuth application with Chimera.
             </br>
             <b>Please ensure that redirect URL is correct!</b>
         </div>
@@ -120,13 +140,12 @@
             <div class="redirectURL">{{ .RedirectURL }}</div>
         </div>
 
-        <form target="_blank">
-            <input onclick="window.location.href ={{ .FullRedirectURL }};" type="submit" value="Confirm" />
+        <form class="from" action={{ .CancelPagePath }} method="post">
+            <input class="cancelButton" autofocus type="submit" value="Cancel"/>
         </form>
-
-        <div id="formFooter">
-            If you did not intend to authorize, or the Redirect URL is not correct or suspicious close this tab!
-        </div>
+        <form target="_blank" class="from">
+            <input class="confirmButton" onclick="window.location.href ={{ .FullRedirectURL }};" type="submit" value="Confirm" />
+        </form>
 
     </div>
 </div>

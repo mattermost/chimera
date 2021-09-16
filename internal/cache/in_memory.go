@@ -37,3 +37,8 @@ func (i *MemoryCache) SetRedirectURI(state, redirectURI string) error {
 	i.cache.Set(state, redirectURI, i.expiration)
 	return nil
 }
+
+func (i *MemoryCache) DeleteState(state string) error {
+	i.cache.Delete(state)
+	return nil
+}

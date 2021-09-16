@@ -51,3 +51,14 @@ func (r *RedisCache) SetRedirectURI(state, redirectURI string) error {
 
 	return nil
 }
+
+func (r *RedisCache) DeleteState(state string) error {
+	err := r.redisClient.Del(context.Background(), state).Err()
+	if err == redis.Nil {
+		return nil
+	}
+	if err != nil {
+		return errors.Wrap(err, "error while deleting state mapping from Redis")
+	}
+	return nil
+}
