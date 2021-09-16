@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"fmt"
+	"github.com/gorilla/csrf"
 	"html/template"
 	"net/http"
 	"net/url"
@@ -49,6 +50,15 @@ type StateCache interface {
 	GetRedirectURI(state string) (string, error)
 	SetRedirectURI(state, redirectURI string) error
 	DeleteState(state string) error
+}
+
+type AuthFormData struct {
+	RedirectURL    string
+	ConfirmAuthURL string
+	ProviderName   string
+	ProviderURL    string
+	CancelAuthURL  string
+	CsrfField template.HTML
 }
 
 func (h *Handler) handleAuthorize(c *Context, w http.ResponseWriter, r *http.Request) {
@@ -181,21 +191,17 @@ func (h *Handler) handleGetConfirmAuthorization(c *Context, w http.ResponseWrite
 	// TODO: we can send some cookie in response that will be required for cancellation
 	// This could prevent some brute force cancellation requests.
 
-	data := struct {
-		RedirectURL    string
-		ConfirmAuthURL string
-		ProviderName   string
-		ProviderURL    string
-		CancelAuthURL  string
-	}{
+	data := AuthFormData{
 		RedirectURL:    strippedURL,
 		ConfirmAuthURL: fmt.Sprintf("%s/v1/%s/%s/auth/chimera/confirm?state=%s", h.baseURL, app.Provider, app.Identifier, state),
 		ProviderName:   app.Provider.DisplayName(),
 		ProviderURL:    app.Provider.HomepageURL(),
 		CancelAuthURL:  fmt.Sprintf("%s/v1/auth/chimera/cancel?state=%s", h.baseURL, state),
+		CsrfField: csrf.TemplateField(r),
 	}
 
 	c.Logger.Info("Displaying authZ confirmation from")
+	// TODO: set cookies
 	w.Header().Set("X-Frame-Options", "DENY")
 	w.WriteHeader(http.StatusOK)
 	err = h.confirmationFromTemplate.Execute(w, data)
@@ -227,6 +233,11 @@ func (h *Handler) handleConfirmAuthorization(c *Context, w http.ResponseWriter, 
 
 func (h *Handler) handleCancelAuthorization(c *Context, w http.ResponseWriter, r *http.Request) {
 	c.Logger.Info("Handling request for canceling of Chimera authZ")
+
+	fmt.Println("COOKIES")
+	for _, c := range r.Cookies() {
+		fmt.Println(c.Name, "   ", c.Value)
+	}
 
 	state := r.URL.Query().Get("state")
 

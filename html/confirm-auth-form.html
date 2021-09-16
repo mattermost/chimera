@@ -131,9 +131,11 @@
         </div>
 
         <form class="from" action={{ .CancelAuthURL }} method="post">
+            {{ .CsrfField }}
             <input class="cancelButton" autofocus type="submit" value="Cancel"/>
         </form>
         <form class="from" action={{ .ConfirmAuthURL }} method="post">
+            {{ .CsrfField }}
             <input class="confirmButton" type="submit" value="Confirm" />
         </form>
 
