@@ -135,7 +135,6 @@ func Test_HandleAuthorizationCallback(t *testing.T) {
 	}
 
 	stateCache := cache.NewInMemoryCache(10*time.Minute)
-
 	server := httptest.NewUnstartedServer(nil)
 
 	router, err := RegisterAPI(
@@ -184,12 +183,12 @@ func Test_HandleAuthorizationCallback(t *testing.T) {
 	require.NoError(t, err)
 	resp = assertRespStatus(t, client, req, http.StatusFound)
 
-	location, err = resp.Location()
+	authConfirmURL, err := resp.Location()
 	require.NoError(t, err)
-	assert.Equal(t, location.String(), fmt.Sprintf("%s/v1/github/github-plugin/auth/chimera/confirm?state=%s", server.URL, state))
+	assert.Equal(t, authConfirmURL.String(), fmt.Sprintf("%s/v1/github/github-plugin/auth/chimera/confirm?state=%s", server.URL, state))
 
 	// Assert Redirect URI was updated.
-	redirectURIRaw, err := stateCache.GetRedirectURI(location.Query().Get("state"))
+	redirectURIRaw, err := stateCache.GetRedirectURI(state)
 	require.NoError(t, err)
 	redirectURI, err := url.Parse(redirectURIRaw)
 	require.NoError(t, err)
@@ -208,11 +207,9 @@ func Test_HandleAuthorizationCallback(t *testing.T) {
 	})
 
 	// Handle Authorization confirmation
-	req, err = http.NewRequest(http.MethodGet, location.String(), nil)
+	req, err = http.NewRequest(http.MethodGet, authConfirmURL.String(), nil)
 	require.NoError(t, err)
-	resp, err = client.Do(req)
-	require.NoError(t, err)
-	require.Equal(t, http.StatusOK, resp.StatusCode)
+	resp = assertRespStatus(t, client, req, http.StatusOK)
 	assert.Equal(t, "DENY", resp.Header.Get("X-Frame-Options"))
 
 	authForm, err := ioutil.ReadAll(resp.Body)
@@ -221,32 +218,38 @@ func Test_HandleAuthorizationCallback(t *testing.T) {
 	authFormParams := strings.Split(string(authForm), "\n")
 	assert.Len(t, authFormParams, 5)
 	assert.Equal(t, "http://my-mm/oauth/complete", authFormParams[0])
+
 	confirmURL, err := url.Parse(authFormParams[1])
 	require.NoError(t, err)
-	assert.Equal(t, "abcd-code", confirmURL.Query().Get("authorization_code"))
-	assert.Equal(t, "some-state", confirmURL.Query().Get("state"))
-	assert.Equal(t, "my-mm", confirmURL.Host)
-	assert.Equal(t, "/oauth/complete", confirmURL.Path)
+	assert.Equal(t, fmt.Sprintf("%s/v1/github/github-plugin/auth/chimera/confirm?state=%s", server.URL, state), confirmURL.String())
+
 	assert.Equal(t, fmt.Sprintf("GitHub"), authFormParams[2])
 	assert.Equal(t, fmt.Sprintf("https://github.com"), authFormParams[3])
 
-	cancelURL := authFormParams[4]
-	assert.Equal(t, fmt.Sprintf("%s/v1/auth/chimera/cancel?state=%s", server.URL,state), cancelURL)
+	cancelURL, err := url.Parse(authFormParams[4])
+	require.NoError(t, err)
+	assert.Equal(t, fmt.Sprintf("%s/v1/auth/chimera/cancel?state=%s", server.URL,state), cancelURL.String())
+
+	// Handle Confirm Authorization
+	req, err = http.NewRequest(http.MethodPost, confirmURL.String(), nil)
+	require.NoError(t, err)
+	resp = assertRespStatus(t, client, req, http.StatusFound)
+	assertRedirectLocation(t, resp, "http://my-mm/oauth/complete?authorization_code=abcd-code&state=some-state")
 
 	// Handle Authorization cancellation
-	req, err = http.NewRequest(http.MethodPost, cancelURL, nil)
+	req, err = http.NewRequest(http.MethodPost, cancelURL.String(), nil)
 	require.NoError(t, err)
-
-	resp, err = client.Do(req)
-	require.NoError(t, err)
-	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	resp = assertRespStatus(t, client, req, http.StatusOK)
 
 	body, err := ioutil.ReadAll(resp.Body)
 	require.NoError(t, err)
 	assert.Equal(t, "Cancel Page", string(body))
 
-	// Test after cancel
-
+	t.Run("fail to confirm after cancellation", func(t *testing.T) {
+		req, err = http.NewRequest(http.MethodPost, confirmURL.String(), nil)
+		require.NoError(t, err)
+		resp = assertRespStatus(t, client, req, http.StatusBadRequest)
+	})
 }
 
 // TODO: test for unicode char
@@ -345,4 +348,10 @@ func assertRespStatus(t *testing.T, client *http.Client, req *http.Request, stat
 	require.NoError(t, err)
 	assert.Equal(t, status, resp.StatusCode)
 	return resp
+}
+
+func assertRedirectLocation(t *testing.T, resp *http.Response, expectedLocation string) {
+	location, err := resp.Location()
+	require.NoError(t, err)
+	assert.Equal(t, expectedLocation, location.String())
 }

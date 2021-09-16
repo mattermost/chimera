@@ -111,8 +111,7 @@ func (h *Handler) handleAuthorizationCallback(c *Context, w http.ResponseWriter,
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
-	c.Logger = c.Logger.WithField("provider", app.Provider).
-		WithField("app", app.Identifier)
+	c.Logger = loggerWithAppFields(c.Logger, app)
 	c.Logger.Info("Handling authorization callback")
 
 	state := r.URL.Query().Get("state")
@@ -161,8 +160,7 @@ func (h *Handler) handleGetConfirmAuthorization(c *Context, w http.ResponseWrite
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
-	c.Logger = c.Logger.WithField("provider", app.Provider).
-		WithField("app", app.Identifier)
+	c.Logger = loggerWithAppFields(c.Logger, app)
 	c.Logger.Info("Handling request for confirmation of Chimera authZ")
 
 	state := r.URL.Query().Get("state")
@@ -188,20 +186,21 @@ func (h *Handler) handleGetConfirmAuthorization(c *Context, w http.ResponseWrite
 		return
 	}
 
-	// TODO: we can send some cookie in response to validate the state cancellation
+	// TODO: we can send some cookie in response that will be required for cancellation
+	// This could prevent some brute force cancellation requests.
 
 	data := struct {
 		RedirectURL     string
-		FullRedirectURL string
+		ConfirmAuthURL string
 		ProviderName string
-		ProviderURL string
-		CancelPagePath string
+		ProviderURL   string
+		CancelAuthURL string
 	}{
 		RedirectURL:     strippedURL,
-		FullRedirectURL: redirectURIRaw,
-		ProviderName: app.Provider.DisplayName(),
-		ProviderURL: app.Provider.HomepageURL(),
-		CancelPagePath: fmt.Sprintf("%s/v1/auth/chimera/cancel?state=%s", h.baseURL, state),
+		ConfirmAuthURL:  fmt.Sprintf("%s/v1/%s/%s/auth/chimera/confirm?state=%s", h.baseURL, app.Provider, app.Identifier, state),
+		ProviderName:    app.Provider.DisplayName(),
+		ProviderURL:     app.Provider.HomepageURL(),
+		CancelAuthURL:   fmt.Sprintf("%s/v1/auth/chimera/cancel?state=%s", h.baseURL, state),
 	}
 
 	c.Logger.Info("Displaying authZ confirmation from")
@@ -219,8 +218,7 @@ func (h *Handler) handleConfirmAuthorization(c *Context, w http.ResponseWriter, 
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
-	c.Logger = c.Logger.WithField("provider", app.Provider).
-		WithField("app", app.Identifier)
+	c.Logger = loggerWithAppFields(c.Logger, app)
 	c.Logger.Info("Handling request for confirmation of Chimera authZ")
 
 	state := r.URL.Query().Get("state")
@@ -241,15 +239,13 @@ func (h *Handler) handleConfirmAuthorization(c *Context, w http.ResponseWriter, 
 	http.Redirect(w, r, redirectURIRaw, http.StatusFound)
 }
 
-
 func (h *Handler) handleTokenExchange(c *Context, w http.ResponseWriter, r *http.Request) {
 	app, found := h.getOAuthApp(c, r)
 	if !found {
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
-	c.Logger = c.Logger.WithField("provider", app.Provider).
-		WithField("app", app.Identifier)
+	c.Logger = loggerWithAppFields(c.Logger, app)
 	c.Logger.Infof("Handling token exchange")
 
 	clientID, clientSecret, ok := r.BasicAuth()
@@ -364,4 +360,9 @@ func stripURLQuery(rawURL string) (string, error) {
 	redirectURI.RawQuery = ""
 
 	return redirectURI.String(), nil
+}
+
+func loggerWithAppFields(logger logrus.FieldLogger, app OAuthApp) logrus.FieldLogger {
+	return logger.WithField("provider", app.Provider).
+		WithField("app", app.Identifier)
 }

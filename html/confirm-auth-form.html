@@ -69,16 +69,6 @@
             text-align: center;
         }
 
-        #formFooter {
-            background-color: #f6f6f6;
-            border-top: 1px solid #dce8f1;
-            padding: 25px;
-            text-align: center;
-            color: red;
-            -webkit-border-radius: 0 0 10px 10px;
-            border-radius: 0 0 10px 10px;
-        }
-
         /* FORM TYPOGRAPHY*/
         input[type=button], input[type=submit], input[type=reset], .cancelButton  {
             border: none;
@@ -140,11 +130,11 @@
             <div class="redirectURL">{{ .RedirectURL }}</div>
         </div>
 
-        <form class="from" action={{ .CancelPagePath }} method="post">
+        <form class="from" action={{ .CancelAuthURL }} method="post">
             <input class="cancelButton" autofocus type="submit" value="Cancel"/>
         </form>
-        <form target="_blank" class="from">
-            <input class="confirmButton" onclick="window.location.href ={{ .FullRedirectURL }};" type="submit" value="Confirm" />
+        <form class="from" action={{ .ConfirmAuthURL }} method="post">
+            <input class="confirmButton" type="submit" value="Confirm" />
         </form>
 
     </div>
