@@ -245,14 +245,12 @@ func Test_HandleAuthorizationCallback(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "Cancel Page", string(body))
 
-	t.Run("fail to confirm after cancellation", func(t *testing.T) {
+	t.Run("fail to confirm after already cancelled", func(t *testing.T) {
 		req, err = http.NewRequest(http.MethodPost, confirmURL.String(), nil)
 		require.NoError(t, err)
 		resp = assertRespStatus(t, client, req, http.StatusBadRequest)
 	})
 }
-
-// TODO: test for unicode char
 
 type mockOAuthURLs struct {
 	tokenURL string

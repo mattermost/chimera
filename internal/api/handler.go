@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"github.com/mattermost/chimera/internal/cache"
+	"github.com/mattermost/chimera/internal/statuserr"
 	"github.com/pkg/errors"
 	"html/template"
 	"net/http"
@@ -116,15 +117,10 @@ func (h *Handler) handleAuthorizationCallback(c *Context, w http.ResponseWriter,
 
 	state := r.URL.Query().Get("state")
 
-	redirectURIRaw, err := h.stateCache.GetRedirectURI(state)
+	redirectURIRaw, err := h.getRedirectURIFromCache(state)
 	if err != nil {
-		if err == cache.ErrNotFound {
-			c.Logger.Error("State provided to webhook handler not found")
-			w.WriteHeader(http.StatusBadRequest)
-		} else {
-			c.Logger.Error("Failed to get state from cache")
-			w.WriteHeader(http.StatusInternalServerError)
-		}
+		c.Logger.WithError(err).Error("Failed to get redirect URI from cache")
+		w.WriteHeader(statuserr.ErrToStatus(err))
 		return
 	}
 
@@ -166,15 +162,10 @@ func (h *Handler) handleGetConfirmAuthorization(c *Context, w http.ResponseWrite
 	state := r.URL.Query().Get("state")
 	fmt.Println("Handle confirm state: ", state)
 
-	redirectURIRaw, err := h.stateCache.GetRedirectURI(state)
+	redirectURIRaw, err := h.getRedirectURIFromCache(state)
 	if err != nil {
-		if err == cache.ErrNotFound {
-			c.Logger.Error("State provided to webhook handler not found")
-			w.WriteHeader(http.StatusBadRequest)
-		} else {
-			c.Logger.Error("Failed to get state from cache")
-			w.WriteHeader(http.StatusInternalServerError)
-		}
+		c.Logger.WithError(err).Error("Failed to get redirect URI from cache")
+		w.WriteHeader(statuserr.ErrToStatus(err))
 		return
 	}
 
@@ -222,21 +213,31 @@ func (h *Handler) handleConfirmAuthorization(c *Context, w http.ResponseWriter, 
 	c.Logger.Info("Handling request for confirmation of Chimera authZ")
 
 	state := r.URL.Query().Get("state")
-	fmt.Println("Handle confirm state: ", state)
 
-	redirectURIRaw, err := h.stateCache.GetRedirectURI(state)
+	redirectURIRaw, err := h.getRedirectURIFromCache(state)
 	if err != nil {
-		if err == cache.ErrNotFound {
-			c.Logger.Error("State provided to webhook handler not found")
-			w.WriteHeader(http.StatusBadRequest)
-		} else {
-			c.Logger.Error("Failed to get state from cache")
-			w.WriteHeader(http.StatusInternalServerError)
-		}
+		c.Logger.WithError(err).Error("Failed to get redirect URI from cache")
+		w.WriteHeader(statuserr.ErrToStatus(err))
 		return
 	}
 
 	http.Redirect(w, r, redirectURIRaw, http.StatusFound)
+}
+
+func (h *Handler) handleCancelAuthorization(c *Context, w http.ResponseWriter, r *http.Request) {
+	c.Logger.Info("Handling request for canceling of Chimera authZ")
+
+	state := r.URL.Query().Get("state")
+
+	err := h.stateCache.DeleteState(state)
+	if err != nil {
+		c.Logger.WithError(err).Error("Failed to delete state")
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	c.Logger.Info("Authorization canceled")
+	http.ServeFile(w, r, h.cancelPagePath)
 }
 
 func (h *Handler) handleTokenExchange(c *Context, w http.ResponseWriter, r *http.Request) {
@@ -296,22 +297,6 @@ func (h *Handler) handleTokenExchange(c *Context, w http.ResponseWriter, r *http
 	writeJSON(w, token, &Context{Logger: logrus.New()})
 }
 
-func (h *Handler) handleCancelAuthorization(c *Context, w http.ResponseWriter, r *http.Request) {
-	c.Logger.Info("Handling request for canceling of Chimera authZ")
-
-	state := r.URL.Query().Get("state")
-
-	err := h.stateCache.DeleteState(state)
-	if err != nil {
-		c.Logger.WithError(err).Error("Failed to delete state")
-		w.WriteHeader(http.StatusInternalServerError)
-		return
-	}
-
-	c.Logger.Info("Authorization canceled")
-	http.ServeFile(w, r, h.cancelPagePath)
-}
-
 func (h *Handler) getOAuthApp(c *Context, r *http.Request) (OAuthApp, bool) {
 	vars := mux.Vars(r)
 	prov, found := vars["provider"]
@@ -350,6 +335,18 @@ func (h *Handler) makeOAuthConfig(scope []string, app OAuthApp) *oauth2.Config {
 		Endpoint:     app.OAuthURLs.Endpoint(),
 		RedirectURL:  app.OAuthURLs.RedirectURL(),
 	}
+}
+
+func (h *Handler) getRedirectURIFromCache(state string) (string, error) {
+	redirectURIRaw, err := h.stateCache.GetRedirectURI(state)
+	if err != nil {
+		if err == cache.ErrNotFound {
+			return "", statuserr.ErrWrap(http.StatusBadRequest, err, "state provided to webhook handler not found in cache")
+		}
+		return "", statuserr.ErrWrap(http.StatusInternalServerError, err, "failed to get state from cache")
+	}
+
+	return redirectURIRaw, nil
 }
 
 func stripURLQuery(rawURL string) (string, error) {
