@@ -15,9 +15,9 @@ type ProviderStaticData struct {
 }
 
 var providerData map[OAuthProvider]ProviderStaticData = map[OAuthProvider]ProviderStaticData{
-	GitHub: {DisplayName: "GitHub", HomepageURL: "https://github.com"},
-	Zoom: {DisplayName: "Zoom", HomepageURL: "https://zoom.us"},
-	GitLab: {DisplayName: "GitLab", HomepageURL: "https://gitlab.com"},
+	GitHub:    {DisplayName: "GitHub", HomepageURL: "https://github.com"},
+	Zoom:      {DisplayName: "Zoom", HomepageURL: "https://zoom.us"},
+	GitLab:    {DisplayName: "GitLab", HomepageURL: "https://gitlab.com"},
 	Microsoft: {DisplayName: "Microsoft", HomepageURL: "https://microsoft.com"},
 }
 
@@ -39,4 +39,3 @@ func ContainsProvider(collection []OAuthProvider, toFind OAuthProvider) bool {
 	}
 	return false
 }
-

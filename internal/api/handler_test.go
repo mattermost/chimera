@@ -134,7 +134,7 @@ func Test_HandleAuthorizationCallback(t *testing.T) {
 		},
 	}
 
-	stateCache := cache.NewInMemoryCache(10*time.Minute)
+	stateCache := cache.NewInMemoryCache(10 * time.Minute)
 	server := httptest.NewUnstartedServer(nil)
 
 	router, err := RegisterAPI(
@@ -143,7 +143,7 @@ func Test_HandleAuthorizationCallback(t *testing.T) {
 		stateCache,
 		fmt.Sprintf("http://%s", server.Listener.Addr().String()),
 		"testdata/test-form.html",
-	"testdata/test-cancel-page.html")
+		"testdata/test-cancel-page.html")
 	require.NoError(t, err)
 	server.Config = &http.Server{Handler: router}
 	server.Start()
@@ -228,7 +228,7 @@ func Test_HandleAuthorizationCallback(t *testing.T) {
 
 	cancelURL, err := url.Parse(authFormParams[4])
 	require.NoError(t, err)
-	assert.Equal(t, fmt.Sprintf("%s/v1/auth/chimera/cancel?state=%s", server.URL,state), cancelURL.String())
+	assert.Equal(t, fmt.Sprintf("%s/v1/auth/chimera/cancel?state=%s", server.URL, state), cancelURL.String())
 
 	// Handle Confirm Authorization
 	req, err = http.NewRequest(http.MethodPost, confirmURL.String(), nil)

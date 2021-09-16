@@ -3,12 +3,13 @@ package api
 import (
 	"context"
 	"fmt"
-	"github.com/mattermost/chimera/internal/cache"
-	"github.com/mattermost/chimera/internal/statuserr"
-	"github.com/pkg/errors"
 	"html/template"
 	"net/http"
 	"net/url"
+
+	"github.com/mattermost/chimera/internal/cache"
+	"github.com/mattermost/chimera/internal/statuserr"
+	"github.com/pkg/errors"
 
 	"github.com/gorilla/mux"
 	"github.com/mattermost/chimera/internal/providers"
@@ -32,7 +33,7 @@ func NewHandler(appsRegistry map[string]OAuthApp, cache StateCache, baseURL, con
 		appsRegistry:             appsRegistry,
 		baseURL:                  baseURL,
 		confirmationFromTemplate: confirmForm,
-		cancelPagePath: cancelPagePath,
+		cancelPagePath:           cancelPagePath,
 	}, nil
 }
 
@@ -41,7 +42,7 @@ type Handler struct {
 	appsRegistry             map[string]OAuthApp
 	baseURL                  string
 	confirmationFromTemplate *template.Template
-	cancelPagePath string
+	cancelPagePath           string
 }
 
 type StateCache interface {
@@ -181,17 +182,17 @@ func (h *Handler) handleGetConfirmAuthorization(c *Context, w http.ResponseWrite
 	// This could prevent some brute force cancellation requests.
 
 	data := struct {
-		RedirectURL     string
+		RedirectURL    string
 		ConfirmAuthURL string
-		ProviderName string
-		ProviderURL   string
-		CancelAuthURL string
+		ProviderName   string
+		ProviderURL    string
+		CancelAuthURL  string
 	}{
-		RedirectURL:     strippedURL,
-		ConfirmAuthURL:  fmt.Sprintf("%s/v1/%s/%s/auth/chimera/confirm?state=%s", h.baseURL, app.Provider, app.Identifier, state),
-		ProviderName:    app.Provider.DisplayName(),
-		ProviderURL:     app.Provider.HomepageURL(),
-		CancelAuthURL:   fmt.Sprintf("%s/v1/auth/chimera/cancel?state=%s", h.baseURL, state),
+		RedirectURL:    strippedURL,
+		ConfirmAuthURL: fmt.Sprintf("%s/v1/%s/%s/auth/chimera/confirm?state=%s", h.baseURL, app.Provider, app.Identifier, state),
+		ProviderName:   app.Provider.DisplayName(),
+		ProviderURL:    app.Provider.HomepageURL(),
+		CancelAuthURL:  fmt.Sprintf("%s/v1/auth/chimera/cancel?state=%s", h.baseURL, state),
 	}
 
 	c.Logger.Info("Displaying authZ confirmation from")
