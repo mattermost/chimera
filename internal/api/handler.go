@@ -3,12 +3,13 @@ package api
 import (
 	"context"
 	"fmt"
-	"github.com/gorilla/csrf"
 	"html/template"
 	"net/http"
 	"net/url"
 
+	"github.com/gorilla/csrf"
 	"github.com/mattermost/chimera/internal/cache"
+
 	"github.com/mattermost/chimera/internal/statuserr"
 	"github.com/pkg/errors"
 
@@ -20,10 +21,11 @@ import (
 )
 
 const (
-	stateExtensionLength = 16
+	stateExtensionLength                   = 16
+	chimeraAuthorizationVerificationCookie = "chimera_authz_verification"
 )
 
-func NewHandler(appsRegistry map[string]OAuthApp, cache StateCache, baseURL, confirmFormPath, cancelPagePath string) (*Handler, error) {
+func NewHandler(appsRegistry map[string]OAuthApp, cache StateCache, baseURL *url.URL, confirmFormPath, cancelPagePath string) (*Handler, error) {
 	confirmForm, err := template.ParseFiles(confirmFormPath)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to parse confirmation form template")
@@ -32,9 +34,10 @@ func NewHandler(appsRegistry map[string]OAuthApp, cache StateCache, baseURL, con
 	return &Handler{
 		stateCache:               cache,
 		appsRegistry:             appsRegistry,
-		baseURL:                  baseURL,
+		baseURL:                  baseURL.String(),
 		confirmationFromTemplate: confirmForm,
 		cancelPagePath:           cancelPagePath,
+		useSecureCookie:          useSecureCookies(baseURL),
 	}, nil
 }
 
@@ -44,11 +47,12 @@ type Handler struct {
 	baseURL                  string
 	confirmationFromTemplate *template.Template
 	cancelPagePath           string
+	useSecureCookie          bool
 }
 
 type StateCache interface {
-	GetRedirectURI(state string) (string, error)
-	SetRedirectURI(state, redirectURI string) error
+	GetRedirectURI(state string) (cache.AuthorizationState, error)
+	SetRedirectURI(state string, authzState cache.AuthorizationState) error
 	DeleteState(state string) error
 }
 
@@ -58,7 +62,7 @@ type AuthFormData struct {
 	ProviderName   string
 	ProviderURL    string
 	CancelAuthURL  string
-	CsrfField template.HTML
+	CsrfField      template.HTML
 }
 
 func (h *Handler) handleAuthorize(c *Context, w http.ResponseWriter, r *http.Request) {
@@ -93,7 +97,7 @@ func (h *Handler) handleAuthorize(c *Context, w http.ResponseWriter, r *http.Req
 	}
 	extendedState := fmt.Sprintf("%s%s", state, util.NewRandomString(stateExtensionLength))
 
-	err := h.stateCache.SetRedirectURI(extendedState, redirectURI)
+	err := h.stateCache.SetRedirectURI(extendedState, cache.AuthorizationState{RedirectURI: redirectURI})
 	if err != nil {
 		c.Logger.WithError(err).Error("Failed to save mapping of state to redirect URI in cache")
 		http.Error(w, "Failed to save state", http.StatusInternalServerError)
@@ -128,14 +132,14 @@ func (h *Handler) handleAuthorizationCallback(c *Context, w http.ResponseWriter,
 
 	state := r.URL.Query().Get("state")
 
-	redirectURIRaw, err := h.getRedirectURIFromCache(state)
+	chimeraAuthZState, err := h.getAuthZStateFromCache(state)
 	if err != nil {
 		c.Logger.WithError(err).Error("Failed to get redirect URI from cache")
 		w.WriteHeader(statuserr.ErrToStatus(err))
 		return
 	}
 
-	redirectURI, err := url.Parse(redirectURIRaw)
+	redirectURI, err := url.Parse(chimeraAuthZState.RedirectURI)
 	if err != nil {
 		c.Logger.Error("Failed to parse destination site URL")
 		w.WriteHeader(http.StatusInternalServerError)
@@ -150,7 +154,8 @@ func (h *Handler) handleAuthorizationCallback(c *Context, w http.ResponseWriter,
 
 	redirectURIStr := redirectURI.String()
 
-	err = h.stateCache.SetRedirectURI(state, redirectURIStr)
+	verificationToken := util.NewRandomString(32)
+	err = h.stateCache.SetRedirectURI(state, cache.AuthorizationState{RedirectURI: redirectURIStr, AuthorizationVerificationToken: verificationToken})
 	if err != nil {
 		c.Logger.Error("Failed to update redirect URL in cache")
 		w.WriteHeader(http.StatusInternalServerError)
@@ -173,7 +178,7 @@ func (h *Handler) handleGetConfirmAuthorization(c *Context, w http.ResponseWrite
 	state := r.URL.Query().Get("state")
 	fmt.Println("Handle confirm state: ", state)
 
-	redirectURIRaw, err := h.getRedirectURIFromCache(state)
+	chimeraAuthZState, err := h.getAuthZStateFromCache(state)
 	if err != nil {
 		c.Logger.WithError(err).Error("Failed to get redirect URI from cache")
 		w.WriteHeader(statuserr.ErrToStatus(err))
@@ -181,15 +186,12 @@ func (h *Handler) handleGetConfirmAuthorization(c *Context, w http.ResponseWrite
 	}
 
 	// Strip URL query for cleaner display
-	strippedURL, err := stripURLQuery(redirectURIRaw)
+	strippedURL, err := stripURLQuery(chimeraAuthZState.RedirectURI)
 	if err != nil {
 		c.Logger.Error("Failed to strip query from redirect URL")
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
-
-	// TODO: we can send some cookie in response that will be required for cancellation
-	// This could prevent some brute force cancellation requests.
 
 	data := AuthFormData{
 		RedirectURL:    strippedURL,
@@ -197,11 +199,11 @@ func (h *Handler) handleGetConfirmAuthorization(c *Context, w http.ResponseWrite
 		ProviderName:   app.Provider.DisplayName(),
 		ProviderURL:    app.Provider.HomepageURL(),
 		CancelAuthURL:  fmt.Sprintf("%s/v1/auth/chimera/cancel?state=%s", h.baseURL, state),
-		CsrfField: csrf.TemplateField(r),
+		CsrfField:      csrf.TemplateField(r),
 	}
 
 	c.Logger.Info("Displaying authZ confirmation from")
-	// TODO: set cookies
+	http.SetCookie(w, h.chimeraAuthZTokenCookie(chimeraAuthZState.AuthorizationVerificationToken))
 	w.Header().Set("X-Frame-Options", "DENY")
 	w.WriteHeader(http.StatusOK)
 	err = h.confirmationFromTemplate.Execute(w, data)
@@ -219,29 +221,30 @@ func (h *Handler) handleConfirmAuthorization(c *Context, w http.ResponseWriter, 
 	c.Logger = loggerWithAppFields(c.Logger, app)
 	c.Logger.Info("Handling request for confirmation of Chimera authZ")
 
-	state := r.URL.Query().Get("state")
-
-	redirectURIRaw, err := h.getRedirectURIFromCache(state)
+	chimeraAuthZState, err := h.verifyAuthorizationCompletion(r)
 	if err != nil {
-		c.Logger.WithError(err).Error("Failed to get redirect URI from cache")
+		c.Logger.WithError(err).Error("Failed to verify authorization competition request")
 		w.WriteHeader(statuserr.ErrToStatus(err))
 		return
 	}
 
-	http.Redirect(w, r, redirectURIRaw, http.StatusFound)
+	// TODO: delete state after successful confirm
+
+	http.Redirect(w, r, chimeraAuthZState.RedirectURI, http.StatusFound)
 }
 
 func (h *Handler) handleCancelAuthorization(c *Context, w http.ResponseWriter, r *http.Request) {
 	c.Logger.Info("Handling request for canceling of Chimera authZ")
 
-	fmt.Println("COOKIES")
-	for _, c := range r.Cookies() {
-		fmt.Println(c.Name, "   ", c.Value)
+	state := r.URL.Query().Get("state")
+	_, err := h.verifyAuthorizationCompletion(r)
+	if err != nil {
+		c.Logger.WithError(err).Error("Failed to verify authorization cancellation request")
+		w.WriteHeader(statuserr.ErrToStatus(err))
+		return
 	}
 
-	state := r.URL.Query().Get("state")
-
-	err := h.stateCache.DeleteState(state)
+	err = h.stateCache.DeleteState(state)
 	if err != nil {
 		c.Logger.WithError(err).Error("Failed to delete state")
 		w.WriteHeader(http.StatusInternalServerError)
@@ -349,16 +352,43 @@ func (h *Handler) makeOAuthConfig(scope []string, app OAuthApp) *oauth2.Config {
 	}
 }
 
-func (h *Handler) getRedirectURIFromCache(state string) (string, error) {
-	redirectURIRaw, err := h.stateCache.GetRedirectURI(state)
+func (h *Handler) getAuthZStateFromCache(state string) (cache.AuthorizationState, error) {
+	authzState, err := h.stateCache.GetRedirectURI(state)
 	if err != nil {
 		if err == cache.ErrNotFound {
-			return "", statuserr.ErrWrap(http.StatusBadRequest, err, "state provided to webhook handler not found in cache")
+			return cache.AuthorizationState{}, statuserr.ErrWrap(http.StatusBadRequest, err, "state provided to webhook handler not found in cache")
 		}
-		return "", statuserr.ErrWrap(http.StatusInternalServerError, err, "failed to get state from cache")
+		return cache.AuthorizationState{}, statuserr.ErrWrap(http.StatusInternalServerError, err, "failed to get chimera authZ state from cache")
 	}
 
-	return redirectURIRaw, nil
+	return authzState, nil
+}
+
+func (h *Handler) verifyAuthorizationCompletion(r *http.Request) (cache.AuthorizationState, error) {
+	state := r.URL.Query().Get("state")
+	authZVerificationTokenCookie, err := r.Cookie(chimeraAuthorizationVerificationCookie)
+	if err != nil {
+		return cache.AuthorizationState{}, statuserr.ErrWrap(http.StatusBadRequest, err, "chimera authZ cookie not provided")
+	}
+
+	chimeraAuthZState, err := h.getAuthZStateFromCache(state)
+	if err != nil {
+		return cache.AuthorizationState{}, errors.Wrap(err, "failed to get redirect URI from cache")
+	}
+	// If the verification token has not been set, the authorization callback from provider did not happen yet
+	if chimeraAuthZState.AuthorizationVerificationToken == "" {
+		return cache.AuthorizationState{}, statuserr.NewErr(http.StatusBadRequest, errors.New("attempt to confirm authorization that has not happen from provider side"))
+	}
+
+	if authZVerificationTokenCookie.Value != chimeraAuthZState.AuthorizationVerificationToken {
+		return cache.AuthorizationState{}, statuserr.NewErr(http.StatusBadRequest, errors.New("authorization token from Cookie does not match the one in Chimera state"))
+	}
+
+	return chimeraAuthZState, nil
+}
+
+func (h *Handler) chimeraAuthZTokenCookie(token string) *http.Cookie {
+	return &http.Cookie{Name: chimeraAuthorizationVerificationCookie, Value: token, Path: "/v1", Secure: h.useSecureCookie}
 }
 
 func stripURLQuery(rawURL string) (string, error) {

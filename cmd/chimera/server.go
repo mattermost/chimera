@@ -90,7 +90,7 @@ func runServer(opts ServerOptions) error {
 		BaseURL:                  baseURL,
 		ConfirmationTemplatePath: opts.ConfirmationTemplatePath,
 		CancelPagePath:           opts.CancelPagePath,
-		CSRFSecret: []byte(opts.CSRFSecret),
+		CSRFSecret:               []byte(opts.CSRFSecret),
 	}
 
 	apiRouter, err := api.RegisterAPI(&api.Context{Logger: logger}, apps, stateCache, config)

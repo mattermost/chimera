@@ -14,7 +14,7 @@ type ServerOptions struct {
 	RedisDatabase            int    `mapstructure:"redis-database"`
 	ConfirmationTemplatePath string `mapstructure:"confirmation-template-path"`
 	CancelPagePath           string `mapstructure:"cancel-page-path"`
-	CSRFSecret           string `mapstructure:"csrf-secret"`
+	CSRFSecret               string `mapstructure:"csrf-secret"`
 	LogLevel                 string `mapstructure:"log-level"`
 }
 

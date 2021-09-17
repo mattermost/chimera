@@ -21,20 +21,20 @@ type MemoryCache struct {
 	cache      *cache.Cache
 }
 
-func (i *MemoryCache) GetRedirectURI(state string) (string, error) {
+func (i *MemoryCache) GetRedirectURI(state string) (AuthorizationState, error) {
 	raw, found := i.cache.Get(state)
 	if !found {
-		return "", ErrNotFound
+		return AuthorizationState{}, ErrNotFound
 	}
-	uri, ok := raw.(string)
+	uri, ok := raw.(AuthorizationState)
 	if !ok {
-		return "", fmt.Errorf("item is not a string")
+		return AuthorizationState{}, fmt.Errorf("item is not a string")
 	}
 	return uri, nil
 }
 
-func (i *MemoryCache) SetRedirectURI(state, redirectURI string) error {
-	i.cache.Set(state, redirectURI, i.expiration)
+func (i *MemoryCache) SetRedirectURI(state string, authZState AuthorizationState) error {
+	i.cache.Set(state, authZState, i.expiration)
 	return nil
 }
 

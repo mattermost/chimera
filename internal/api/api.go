@@ -2,8 +2,10 @@ package api
 
 import (
 	"encoding/json"
-	"github.com/gorilla/csrf"
 	"net/http"
+	"net/url"
+
+	"github.com/gorilla/csrf"
 
 	"github.com/pkg/errors"
 
@@ -12,10 +14,10 @@ import (
 )
 
 type Config struct {
-	BaseURL string
+	BaseURL                  string
 	ConfirmationTemplatePath string
-	CancelPagePath string
-	CSRFSecret []byte
+	CancelPagePath           string
+	CSRFSecret               []byte
 }
 
 // RegisterAPI registers the API endpoints on the given router.
@@ -29,13 +31,16 @@ func RegisterAPI(context *Context, oauthApps map[string]OAuthApp, cache StateCac
 		w.Write([]byte("Ok"))
 	})
 
-	// TODO: set secure based on baseURL schema
-	csrfSecure := false
-	csrfHandler := csrf.Protect(cfg.CSRFSecret, csrf.Secure(csrfSecure), csrf.Path("/v1"))
+	baseURL, err := url.Parse(cfg.BaseURL)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to parse base URL")
+	}
+
+	csrfHandler := csrf.Protect(cfg.CSRFSecret, csrf.Secure(useSecureCookies(baseURL)), csrf.Path("/v1"))
 
 	v1Router := rootRouter.PathPrefix("/v1").Subrouter()
 
-	handler, err := NewHandler(oauthApps, cache, cfg.BaseURL, cfg.ConfirmationTemplatePath, cfg.CancelPagePath)
+	handler, err := NewHandler(oauthApps, cache, baseURL, cfg.ConfirmationTemplatePath, cfg.CancelPagePath)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to create handler")
 	}
@@ -58,4 +63,11 @@ func writeJSON(w http.ResponseWriter, v interface{}, c *Context) {
 	if err := json.NewEncoder(w).Encode(v); err != nil {
 		c.Logger.WithError(err).Error("Failed to write json response")
 	}
+}
+
+func useSecureCookies(baseURL *url.URL) bool {
+	if baseURL.Scheme == "http" {
+		return false
+	}
+	return true
 }
