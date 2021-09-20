@@ -13,8 +13,6 @@ import (
 	"github.com/mattermost/chimera/internal/statuserr"
 	"github.com/pkg/errors"
 
-	"github.com/gorilla/mux"
-	"github.com/mattermost/chimera/internal/providers"
 	"github.com/mattermost/chimera/internal/util"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/oauth2"
@@ -25,7 +23,7 @@ const (
 	chimeraAuthorizationVerificationCookie = "chimera_authz_verification"
 )
 
-func NewHandler(appsRegistry map[string]OAuthApp, cache StateCache, baseURL *url.URL, confirmFormPath, cancelPagePath string) (*Handler, error) {
+func NewHandler(cache StateCache, baseURL *url.URL, confirmFormPath, cancelPagePath string) (*Handler, error) {
 	confirmForm, err := template.ParseFiles(confirmFormPath)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to parse confirmation form template")
@@ -33,7 +31,6 @@ func NewHandler(appsRegistry map[string]OAuthApp, cache StateCache, baseURL *url
 
 	return &Handler{
 		stateCache:               cache,
-		appsRegistry:             appsRegistry,
 		baseURL:                  baseURL.String(),
 		confirmationFromTemplate: confirmForm,
 		cancelPagePath:           cancelPagePath,
@@ -43,7 +40,6 @@ func NewHandler(appsRegistry map[string]OAuthApp, cache StateCache, baseURL *url
 
 type Handler struct {
 	stateCache               StateCache
-	appsRegistry             map[string]OAuthApp
 	baseURL                  string
 	confirmationFromTemplate *template.Template
 	cancelPagePath           string
@@ -65,14 +61,8 @@ type AuthFormData struct {
 	CsrfField      template.HTML
 }
 
-func (h *Handler) handleAuthorize(c *Context, w http.ResponseWriter, r *http.Request) {
-	app, found := h.getOAuthApp(c, r)
-	if !found {
-		w.WriteHeader(http.StatusNotFound)
-		return
-	}
-	c.Logger = c.Logger.WithField("provider", app.Provider).
-		WithField("app", app.Identifier)
+func (h *Handler) handleAuthorize(c *OAuthAppContext, w http.ResponseWriter, r *http.Request) {
+	c.Logger = loggerWithAppFields(c.Logger, c.OAuthApplication)
 	c.Logger.Infof("Handling authorization")
 
 	redirectURI := r.URL.Query().Get("redirect_uri")
@@ -113,7 +103,7 @@ func (h *Handler) handleAuthorize(c *Context, w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	conf := h.makeOAuthConfig(scope, app)
+	conf := h.makeOAuthConfig(scope, c.OAuthApplication)
 
 	authURL := conf.AuthCodeURL(extendedState, oauth2.AccessTypeOffline)
 	c.Logger.Infof("Redirecting to auth URL")
@@ -121,13 +111,8 @@ func (h *Handler) handleAuthorize(c *Context, w http.ResponseWriter, r *http.Req
 	http.Redirect(w, r, authURL, http.StatusFound)
 }
 
-func (h *Handler) handleAuthorizationCallback(c *Context, w http.ResponseWriter, r *http.Request) {
-	app, found := h.getOAuthApp(c, r)
-	if !found {
-		w.WriteHeader(http.StatusNotFound)
-		return
-	}
-	c.Logger = loggerWithAppFields(c.Logger, app)
+func (h *Handler) handleAuthorizationCallback(c *OAuthAppContext, w http.ResponseWriter, r *http.Request) {
+	c.Logger = loggerWithAppFields(c.Logger, c.OAuthApplication)
 	c.Logger.Info("Handling authorization callback")
 
 	state := r.URL.Query().Get("state")
@@ -163,16 +148,11 @@ func (h *Handler) handleAuthorizationCallback(c *Context, w http.ResponseWriter,
 	}
 
 	c.Logger.Info("Redirecting authorization callback to confirmation")
-	http.Redirect(w, r, fmt.Sprintf("%s/v1/%s/%s/auth/chimera/confirm?state=%s", h.baseURL, app.Provider, app.Identifier, state), http.StatusFound)
+	http.Redirect(w, r, fmt.Sprintf("%s/v1/%s/%s/auth/chimera/confirm?state=%s", h.baseURL, c.OAuthApplication.Provider, c.OAuthApplication.Identifier, state), http.StatusFound)
 }
 
-func (h *Handler) handleGetConfirmAuthorization(c *Context, w http.ResponseWriter, r *http.Request) {
-	app, found := h.getOAuthApp(c, r)
-	if !found {
-		w.WriteHeader(http.StatusNotFound)
-		return
-	}
-	c.Logger = loggerWithAppFields(c.Logger, app)
+func (h *Handler) handleGetConfirmAuthorization(c *OAuthAppContext, w http.ResponseWriter, r *http.Request) {
+	c.Logger = loggerWithAppFields(c.Logger, c.OAuthApplication)
 	c.Logger.Info("Handling request for confirmation of Chimera authZ")
 
 	state := r.URL.Query().Get("state")
@@ -195,9 +175,9 @@ func (h *Handler) handleGetConfirmAuthorization(c *Context, w http.ResponseWrite
 
 	data := AuthFormData{
 		RedirectURL:    strippedURL,
-		ConfirmAuthURL: fmt.Sprintf("%s/v1/%s/%s/auth/chimera/confirm?state=%s", h.baseURL, app.Provider, app.Identifier, state),
-		ProviderName:   app.Provider.DisplayName(),
-		ProviderURL:    app.Provider.HomepageURL(),
+		ConfirmAuthURL: fmt.Sprintf("%s/v1/%s/%s/auth/chimera/confirm?state=%s", h.baseURL, c.OAuthApplication.Provider, c.OAuthApplication.Identifier, state),
+		ProviderName:   c.OAuthApplication.Provider.DisplayName(),
+		ProviderURL:    c.OAuthApplication.Provider.HomepageURL(),
 		CancelAuthURL:  fmt.Sprintf("%s/v1/auth/chimera/cancel?state=%s", h.baseURL, state),
 		CsrfField:      csrf.TemplateField(r),
 	}
@@ -212,13 +192,8 @@ func (h *Handler) handleGetConfirmAuthorization(c *Context, w http.ResponseWrite
 	}
 }
 
-func (h *Handler) handleConfirmAuthorization(c *Context, w http.ResponseWriter, r *http.Request) {
-	app, found := h.getOAuthApp(c, r)
-	if !found {
-		w.WriteHeader(http.StatusNotFound)
-		return
-	}
-	c.Logger = loggerWithAppFields(c.Logger, app)
+func (h *Handler) handleConfirmAuthorization(c *OAuthAppContext, w http.ResponseWriter, r *http.Request) {
+	c.Logger = loggerWithAppFields(c.Logger, c.OAuthApplication)
 	c.Logger.Info("Handling request for confirmation of Chimera authZ")
 
 	state := r.URL.Query().Get("state")
@@ -261,13 +236,8 @@ func (h *Handler) handleCancelAuthorization(c *Context, w http.ResponseWriter, r
 	http.ServeFile(w, r, h.cancelPagePath)
 }
 
-func (h *Handler) handleTokenExchange(c *Context, w http.ResponseWriter, r *http.Request) {
-	app, found := h.getOAuthApp(c, r)
-	if !found {
-		w.WriteHeader(http.StatusNotFound)
-		return
-	}
-	c.Logger = loggerWithAppFields(c.Logger, app)
+func (h *Handler) handleTokenExchange(c *OAuthAppContext, w http.ResponseWriter, r *http.Request) {
+	c.Logger = loggerWithAppFields(c.Logger, c.OAuthApplication)
 	c.Logger.Infof("Handling token exchange")
 
 	clientID, clientSecret, ok := r.BasicAuth()
@@ -287,7 +257,7 @@ func (h *Handler) handleTokenExchange(c *Context, w http.ResponseWriter, r *http
 	if !found {
 		scope = []string{}
 	}
-	conf := h.makeOAuthConfig(scope, app)
+	conf := h.makeOAuthConfig(scope, c.OAuthApplication)
 
 	err := r.ParseForm()
 	if err != nil {
@@ -316,36 +286,6 @@ func (h *Handler) handleTokenExchange(c *Context, w http.ResponseWriter, r *http
 	c.Logger.Info("Responding with access token")
 
 	writeJSON(w, token, &Context{Logger: logrus.New()})
-}
-
-func (h *Handler) getOAuthApp(c *Context, r *http.Request) (OAuthApp, bool) {
-	vars := mux.Vars(r)
-	prov, found := vars["provider"]
-	if !found {
-		return OAuthApp{}, false
-	}
-	oauthProvider := providers.OAuthProvider(prov)
-	if !providers.ContainsProvider(providers.ValidProviders, oauthProvider) {
-		c.Logger.Warnf("Unsupported provider: %q", oauthProvider)
-		return OAuthApp{}, false
-	}
-
-	appID, found := vars["app"]
-	if !found {
-		return OAuthApp{}, false
-	}
-	app, found := h.appsRegistry[appID]
-	if !found {
-		c.Logger.Warnf("App %q not found", appID)
-		return OAuthApp{}, false
-	}
-
-	if app.Provider != oauthProvider {
-		c.Logger.Warn("App ID does not match provider")
-		return OAuthApp{}, false
-	}
-
-	return app, true
 }
 
 func (h *Handler) makeOAuthConfig(scope []string, app OAuthApp) *oauth2.Config {

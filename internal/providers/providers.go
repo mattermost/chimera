@@ -9,12 +9,12 @@ const (
 	Microsoft OAuthProvider = "microsoft"
 )
 
-type ProviderStaticData struct {
+type ProviderMetadata struct {
 	DisplayName string
 	HomepageURL string
 }
 
-var providerData map[OAuthProvider]ProviderStaticData = map[OAuthProvider]ProviderStaticData{
+var providerStaticData map[OAuthProvider]ProviderMetadata = map[OAuthProvider]ProviderMetadata{
 	GitHub:    {DisplayName: "GitHub", HomepageURL: "https://github.com"},
 	Zoom:      {DisplayName: "Zoom", HomepageURL: "https://zoom.us"},
 	GitLab:    {DisplayName: "GitLab", HomepageURL: "https://gitlab.com"},
@@ -22,11 +22,11 @@ var providerData map[OAuthProvider]ProviderStaticData = map[OAuthProvider]Provid
 }
 
 func (p OAuthProvider) DisplayName() string {
-	return providerData[p].DisplayName
+	return providerStaticData[p].DisplayName
 }
 
 func (p OAuthProvider) HomepageURL() string {
-	return providerData[p].HomepageURL
+	return providerStaticData[p].HomepageURL
 }
 
 var ValidProviders = []OAuthProvider{GitHub, Zoom, GitLab, Microsoft}
