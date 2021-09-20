@@ -34,7 +34,6 @@ func newServeCmd() *cobra.Command {
 
 	cmd.Flags().Int("port", 9876, "Port on which server should be listening.")
 	cmd.Flags().String("address", "", "External address of Chimera service.")
-
 	cmd.Flags().String("apps-config", "apps-config.json", "Path to the file containing OAuth apps configuration.")
 	cmd.Flags().String("cache-driver", "inMemory", "Cache driver to be used by application, one of: inMemory, redis.")
 	cmd.Flags().String("cache-expiration", "10m", "Cache expiry time.")
@@ -67,7 +66,7 @@ func runServer(opts ServerOptions) error {
 	logger.Infof("Starting Chimera on port: %d", opts.Port)
 
 	if opts.Address == "" {
-		opts.Address = fmt.Sprintf("http://localhost:%d",opts.Port)
+		opts.Address = fmt.Sprintf("http://localhost:%d", opts.Port)
 	}
 	logger.Infof("Chimera eternal address: %s", opts.Address)
 
