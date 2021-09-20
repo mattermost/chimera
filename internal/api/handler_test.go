@@ -52,7 +52,8 @@ func Test_HandleAuthorize(t *testing.T) {
 		CSRFSecret:               []byte("secret"),
 	}
 
-	router, err := RegisterAPI(&Context{Logger: logrus.New()}, oauthApps, cache.NewInMemoryCache(10*time.Minute), cfg)
+	stateCache := cache.NewInMemoryCache(10 * time.Minute)
+	router, err := RegisterAPI(&Context{Logger: logrus.New()}, oauthApps, stateCache, cfg)
 	require.NoError(t, err)
 	server := httptest.NewServer(router)
 	defer server.Close()
@@ -70,13 +71,18 @@ func Test_HandleAuthorize(t *testing.T) {
 		"state":        {"some-state"},
 	}.Encode()
 
-	req, err := http.NewRequest(http.MethodGet, authURL.String(), nil)
+	// Request Chimera authorization expecting success
+	location := requestChimeraAuthorization(t, authURL.String(), client)
+
+	extendedStateToken := location.Query().Get("state")
+	authZState, err := stateCache.GetRedirectURI(extendedStateToken)
 	require.NoError(t, err)
 
-	resp := assertRespStatus(t, client, req, http.StatusFound)
+	// Assert authorization state
+	assert.Equal(t, "http://my-mm/oauth/complete", authZState.RedirectURI)
+	assert.Empty(t, authZState.AuthorizationVerificationToken)
 
-	location, err := resp.Location()
-	require.NoError(t, err)
+	// Assert redirect URI
 	assert.Equal(t, "github.com", location.Host)
 	assert.Equal(t, "/login/oauth/authorize", location.Path)
 	assert.Equal(t, "offline", location.Query().Get("access_type"))
@@ -133,7 +139,7 @@ func Test_HandleAuthorize(t *testing.T) {
 	})
 }
 
-func Test_HandleAuthorizationCallback(t *testing.T) {
+func Test_HandleFullAuthorization(t *testing.T) {
 	oauthApps := map[string]OAuthApp{
 		"github-plugin": {
 			OAuthAppConfig: oauthapps.OAuthAppConfig{
@@ -153,7 +159,7 @@ func Test_HandleAuthorizationCallback(t *testing.T) {
 		BaseURL:                  fmt.Sprintf("http://%s", server.Listener.Addr().String()),
 		ConfirmationTemplatePath: "testdata/test-form.html",
 		CancelPagePath:           "testdata/test-cancel-page.html",
-		CSRFSecret:               []byte("secret--------------------------"),
+		CSRFSecret:               []byte("secret"),
 	}
 
 	router, err := RegisterAPI(&Context{Logger: logrus.New()}, oauthApps, stateCache, cfg)
@@ -164,147 +170,186 @@ func Test_HandleAuthorizationCallback(t *testing.T) {
 
 	client := newNoRedirectsClient()
 
-	// Authorize to save state in cache
-	githubAppPathPrefix := fmt.Sprintf("%s/v1/github/github-plugin", server.URL)
-	authURL, err := url.Parse(fmt.Sprintf("%s/oauth/authorize", githubAppPathPrefix))
-	require.NoError(t, err)
+	// To avoid duplicating logic for all initial steps, this parametrizes test running either
+	// authorization confirmation or cancellation at the end.
+	for _, testCase := range []struct {
+		description          string
+		initialOAuthState    string
+		finalizationFunction func(confirmURL, cancelURL *url.URL, csrfToken string, cookies map[string]*http.Cookie)
+	}{
+		{
+			description:       "confirm authorization",
+			initialOAuthState: "some-state",
+			finalizationFunction: func(confirmURL, cancelURL *url.URL, csrfToken string, cookies map[string]*http.Cookie) {
+				csrfTokenCookie := cookies[gorillaCSRFCookie]
+				authZVerificationTokenCookie := cookies[chimeraAuthorizationVerificationCookie]
 
-	authURL.RawQuery = url.Values{
-		"redirect_uri": {"http://my-mm/oauth/complete"},
-		"client_id":    {"dummy-id"},
-		"state":        {"some-state"},
-	}.Encode()
+				// Handle Confirm Authorization
+				t.Run("failed to confirm AuthZ without CSRF token", func(t *testing.T) {
+					req, err := http.NewRequest(http.MethodPost, confirmURL.String(), nil)
+					require.NoError(t, err)
+					req.AddCookie(authZVerificationTokenCookie)
+					assertRespStatus(t, client, req, http.StatusForbidden)
+				})
+				t.Run("failed to cancel AuthZ without CSRF token", func(t *testing.T) {
+					req, err := http.NewRequest(http.MethodPost, cancelURL.String(), nil)
+					require.NoError(t, err)
+					req.AddCookie(authZVerificationTokenCookie)
+					assertRespStatus(t, client, req, http.StatusForbidden)
+				})
+				t.Run("failed to confirm AuthZ without AuthZ Verification token", func(t *testing.T) {
+					req, err := http.NewRequest(http.MethodPost, confirmURL.String(), nil)
+					require.NoError(t, err)
+					setCSRF(req, csrfTokenCookie, csrfToken)
+					assertRespStatus(t, client, req, http.StatusBadRequest)
+				})
+				t.Run("failed to cancel AuthZ without AuthZ Verification token", func(t *testing.T) {
+					req, err := http.NewRequest(http.MethodPost, cancelURL.String(), nil)
+					require.NoError(t, err)
+					setCSRF(req, csrfTokenCookie, csrfToken)
+					assertRespStatus(t, client, req, http.StatusBadRequest)
+				})
 
-	req, err := http.NewRequest(http.MethodGet, authURL.String(), nil)
+				req, err := http.NewRequest(http.MethodPost, confirmURL.String(), nil)
+				require.NoError(t, err)
+				setCSRF(req, csrfTokenCookie, csrfToken)
+				req.AddCookie(authZVerificationTokenCookie)
+				resp := assertRespStatus(t, client, req, http.StatusFound)
+				assertRedirectLocation(t, resp, "http://my-mm/oauth/complete?authorization_code=abcd-code&state=some-state")
+
+				t.Run("fail to confirm second time - authz state should be deleted", func(t *testing.T) {
+					assertRespStatus(t, client, req, http.StatusBadRequest)
+				})
+			},
+		},
+		{
+			description:       "cancel authorization",
+			initialOAuthState: "some-state-cancel",
+			finalizationFunction: func(confirmURL, cancelURL *url.URL, csrfToken string, cookies map[string]*http.Cookie) {
+				csrfTokenCookie := cookies[gorillaCSRFCookie]
+				authZVerificationTokenCookie := cookies[chimeraAuthorizationVerificationCookie]
+
+				// Handle Cancel Authorization
+				req, err := http.NewRequest(http.MethodPost, cancelURL.String(), nil)
+				require.NoError(t, err)
+				setCSRF(req, csrfTokenCookie, csrfToken)
+				req.AddCookie(authZVerificationTokenCookie)
+				resp := assertRespStatus(t, client, req, http.StatusOK)
+
+				body, err := ioutil.ReadAll(resp.Body)
+				require.NoError(t, err)
+				assert.Equal(t, "Cancel Page", string(body))
+
+				t.Run("fail to confirm after already cancelled", func(t *testing.T) {
+					req, err = http.NewRequest(http.MethodPost, confirmURL.String(), nil)
+					require.NoError(t, err)
+					setCSRF(req, csrfTokenCookie, csrfToken)
+					req.AddCookie(authZVerificationTokenCookie)
+					assertRespStatus(t, client, req, http.StatusBadRequest)
+				})
+			},
+		},
+	} {
+		t.Run(testCase.description, func(t *testing.T) {
+			githubAppPathPrefix := fmt.Sprintf("%s/v1/github/github-plugin", server.URL)
+			authURL, err := url.Parse(fmt.Sprintf("%s/oauth/authorize", githubAppPathPrefix))
+			require.NoError(t, err)
+
+			authURL.RawQuery = url.Values{
+				"redirect_uri": {"http://my-mm/oauth/complete"},
+				"client_id":    {"dummy-id"},
+				"state":        {testCase.initialOAuthState},
+			}.Encode()
+
+			// Request Chimera authorization expecting success
+			location := requestChimeraAuthorization(t, authURL.String(), client)
+
+			extendedStateToken := location.Query().Get("state")
+
+			// Make Auth callback
+			callbackURL, err := url.Parse(fmt.Sprintf("%s/oauth/complete", githubAppPathPrefix))
+			require.NoError(t, err)
+
+			callbackURL.RawQuery = url.Values{
+				"state":              {extendedStateToken},
+				"authorization_code": {"abcd-code"},
+			}.Encode()
+
+			req, err := http.NewRequest(http.MethodGet, callbackURL.String(), nil)
+			require.NoError(t, err)
+			resp := assertRespStatus(t, client, req, http.StatusFound)
+
+			authConfirmURL, err := resp.Location()
+			require.NoError(t, err)
+			assert.Equal(t, authConfirmURL.String(), fmt.Sprintf("%s/v1/github/github-plugin/auth/chimera/confirm?state=%s", server.URL, extendedStateToken))
+
+			// Assert Redirect URI was updated and Authorization Verification Token set.
+			chimeraAuthZState, err := stateCache.GetRedirectURI(extendedStateToken)
+			require.NoError(t, err)
+			assert.NotEmpty(t, chimeraAuthZState.AuthorizationVerificationToken)
+			redirectURI, err := url.Parse(chimeraAuthZState.RedirectURI)
+			require.NoError(t, err)
+			assert.Equal(t, "abcd-code", redirectURI.Query().Get("authorization_code"))
+			assert.Equal(t, testCase.initialOAuthState, redirectURI.Query().Get("state"))
+
+			t.Run("return 400 when state is invalid", func(t *testing.T) {
+				callbackURL.RawQuery = url.Values{
+					"state":              {"invalid-state"},
+					"authorization_code": {"abcd-code"},
+				}.Encode()
+
+				req, err = http.NewRequest(http.MethodGet, callbackURL.String(), nil)
+				require.NoError(t, err)
+				_ = assertRespStatus(t, client, req, http.StatusBadRequest)
+			})
+
+			// Handle Ask for Authorization Confirmation
+			req, err = http.NewRequest(http.MethodGet, authConfirmURL.String(), nil)
+			require.NoError(t, err)
+			resp = assertRespStatus(t, client, req, http.StatusOK)
+			assert.Equal(t, "DENY", resp.Header.Get("X-Frame-Options"))
+			confirmAuthCookies := getCookiesMap(resp.Cookies())
+			assert.Equal(t, chimeraAuthZState.AuthorizationVerificationToken, confirmAuthCookies[chimeraAuthorizationVerificationCookie].Value)
+			assert.NotEmpty(t, confirmAuthCookies[gorillaCSRFCookie].Value)
+
+			authForm, err := ioutil.ReadAll(resp.Body)
+			require.NoError(t, err)
+
+			authFormParams := strings.Split(string(authForm), "\n")
+			assert.Len(t, authFormParams, 6)
+			assert.Equal(t, "http://my-mm/oauth/complete", authFormParams[0])
+
+			confirmURL, err := url.Parse(authFormParams[1])
+			require.NoError(t, err)
+			assert.Equal(t, fmt.Sprintf("%s/v1/github/github-plugin/auth/chimera/confirm?state=%s", server.URL, extendedStateToken), confirmURL.String())
+
+			assert.Equal(t, fmt.Sprintf("GitHub"), authFormParams[2])
+			assert.Equal(t, fmt.Sprintf("https://github.com"), authFormParams[3])
+
+			cancelURL, err := url.Parse(authFormParams[4])
+			require.NoError(t, err)
+			assert.Equal(t, fmt.Sprintf("%s/v1/auth/chimera/cancel?state=%s", server.URL, extendedStateToken), cancelURL.String())
+
+			csrfField := authFormParams[5]
+			csrfToken := extractCSRFToken(t, csrfField)
+			assert.NotEmpty(t, csrfToken)
+
+			// Run Authorization finalization
+			testCase.finalizationFunction(confirmURL, cancelURL, csrfToken, confirmAuthCookies)
+		})
+	}
+}
+
+// requestChimeraAuthorization requests initial Chimera authorization and returns redirection location.
+func requestChimeraAuthorization(t *testing.T, authURL string, client *http.Client) *url.URL {
+	req, err := http.NewRequest(http.MethodGet, authURL, nil)
 	require.NoError(t, err)
 	resp := assertRespStatus(t, client, req, http.StatusFound)
 
 	location, err := resp.Location()
 	require.NoError(t, err)
-	state := location.Query().Get("state")
 
-	// Make Auth callback
-	callbackURL, err := url.Parse(fmt.Sprintf("%s/oauth/complete", githubAppPathPrefix))
-	require.NoError(t, err)
-
-	callbackURL.RawQuery = url.Values{
-		"state":              {state},
-		"authorization_code": {"abcd-code"},
-	}.Encode()
-
-	req, err = http.NewRequest(http.MethodGet, callbackURL.String(), nil)
-	require.NoError(t, err)
-	resp = assertRespStatus(t, client, req, http.StatusFound)
-
-	authConfirmURL, err := resp.Location()
-	require.NoError(t, err)
-	assert.Equal(t, authConfirmURL.String(), fmt.Sprintf("%s/v1/github/github-plugin/auth/chimera/confirm?state=%s", server.URL, state))
-
-	// Assert Redirect URI was updated and Authorization Verification Token set.
-	chimeraAuthZState, err := stateCache.GetRedirectURI(state)
-	require.NoError(t, err)
-	assert.NotEmpty(t, chimeraAuthZState.AuthorizationVerificationToken)
-	redirectURI, err := url.Parse(chimeraAuthZState.RedirectURI)
-	require.NoError(t, err)
-	assert.Equal(t, "abcd-code", redirectURI.Query().Get("authorization_code"))
-	assert.Equal(t, "some-state", redirectURI.Query().Get("state"))
-
-	t.Run("return 400 when state is invalid", func(t *testing.T) {
-		callbackURL.RawQuery = url.Values{
-			"state":              {"invalid-state"},
-			"authorization_code": {"abcd-code"},
-		}.Encode()
-
-		req, err = http.NewRequest(http.MethodGet, callbackURL.String(), nil)
-		require.NoError(t, err)
-		_ = assertRespStatus(t, client, req, http.StatusBadRequest)
-	})
-
-	// Handle Ask for Authorization Confirmation
-	req, err = http.NewRequest(http.MethodGet, authConfirmURL.String(), nil)
-	require.NoError(t, err)
-	resp = assertRespStatus(t, client, req, http.StatusOK)
-	assert.Equal(t, "DENY", resp.Header.Get("X-Frame-Options"))
-	confirmAuthCookies := getCookiesMap(resp.Cookies())
-	assert.Equal(t, chimeraAuthZState.AuthorizationVerificationToken, confirmAuthCookies[chimeraAuthorizationVerificationCookie].Value)
-	assert.NotEmpty(t, confirmAuthCookies[gorillaCSRFCookie].Value)
-
-	authForm, err := ioutil.ReadAll(resp.Body)
-	require.NoError(t, err)
-
-	authFormParams := strings.Split(string(authForm), "\n")
-	assert.Len(t, authFormParams, 6)
-	assert.Equal(t, "http://my-mm/oauth/complete", authFormParams[0])
-
-	confirmURL, err := url.Parse(authFormParams[1])
-	require.NoError(t, err)
-	assert.Equal(t, fmt.Sprintf("%s/v1/github/github-plugin/auth/chimera/confirm?state=%s", server.URL, state), confirmURL.String())
-
-	assert.Equal(t, fmt.Sprintf("GitHub"), authFormParams[2])
-	assert.Equal(t, fmt.Sprintf("https://github.com"), authFormParams[3])
-
-	cancelURL, err := url.Parse(authFormParams[4])
-	require.NoError(t, err)
-	assert.Equal(t, fmt.Sprintf("%s/v1/auth/chimera/cancel?state=%s", server.URL, state), cancelURL.String())
-
-	csrfField := authFormParams[5]
-	csrfToken := extractCSRFToken(t, csrfField)
-	assert.NotEmpty(t, csrfToken)
-
-	// Handle Confirm Authorization
-	csrfTokenCookie := confirmAuthCookies[gorillaCSRFCookie]
-	authZVerificationTokenCookie := confirmAuthCookies[chimeraAuthorizationVerificationCookie]
-
-	t.Run("failed to confirm AuthZ without CSRF token", func(t *testing.T) {
-		req, err = http.NewRequest(http.MethodPost, confirmURL.String(), nil)
-		require.NoError(t, err)
-		req.AddCookie(authZVerificationTokenCookie)
-		resp = assertRespStatus(t, client, req, http.StatusForbidden)
-	})
-	t.Run("failed to cancel AuthZ without CSRF token", func(t *testing.T) {
-		req, err = http.NewRequest(http.MethodPost, cancelURL.String(), nil)
-		require.NoError(t, err)
-		req.AddCookie(authZVerificationTokenCookie)
-		resp = assertRespStatus(t, client, req, http.StatusForbidden)
-	})
-	t.Run("failed to confirm AuthZ without AuthZ Verification token", func(t *testing.T) {
-		req, err = http.NewRequest(http.MethodPost, confirmURL.String(), nil)
-		require.NoError(t, err)
-		setCSRF(req, csrfTokenCookie, csrfToken)
-		resp = assertRespStatus(t, client, req, http.StatusBadRequest)
-	})
-	t.Run("failed to cancel AuthZ without AuthZ Verification token", func(t *testing.T) {
-		req, err = http.NewRequest(http.MethodPost, cancelURL.String(), nil)
-		require.NoError(t, err)
-		setCSRF(req, csrfTokenCookie, csrfToken)
-		resp = assertRespStatus(t, client, req, http.StatusBadRequest)
-	})
-
-	req, err = http.NewRequest(http.MethodPost, confirmURL.String(), nil)
-	require.NoError(t, err)
-	setCSRF(req, csrfTokenCookie, csrfToken)
-	req.AddCookie(authZVerificationTokenCookie)
-	resp = assertRespStatus(t, client, req, http.StatusFound)
-	assertRedirectLocation(t, resp, "http://my-mm/oauth/complete?authorization_code=abcd-code&state=some-state")
-
-	// Handle Cancel Authorization
-	req, err = http.NewRequest(http.MethodPost, cancelURL.String(), nil)
-	require.NoError(t, err)
-	setCSRF(req, csrfTokenCookie, csrfToken)
-	req.AddCookie(authZVerificationTokenCookie)
-	resp = assertRespStatus(t, client, req, http.StatusOK)
-
-	body, err := ioutil.ReadAll(resp.Body)
-	require.NoError(t, err)
-	assert.Equal(t, "Cancel Page", string(body))
-
-	t.Run("fail to confirm after already cancelled", func(t *testing.T) {
-		req, err = http.NewRequest(http.MethodPost, confirmURL.String(), nil)
-		require.NoError(t, err)
-		setCSRF(req, csrfTokenCookie, csrfToken)
-		req.AddCookie(authZVerificationTokenCookie)
-		resp = assertRespStatus(t, client, req, http.StatusBadRequest)
-	})
+	return location
 }
 
 type mockOAuthURLs struct {

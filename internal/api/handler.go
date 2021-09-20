@@ -221,6 +221,7 @@ func (h *Handler) handleConfirmAuthorization(c *Context, w http.ResponseWriter, 
 	c.Logger = loggerWithAppFields(c.Logger, app)
 	c.Logger.Info("Handling request for confirmation of Chimera authZ")
 
+	state := r.URL.Query().Get("state")
 	chimeraAuthZState, err := h.verifyAuthorizationCompletion(r)
 	if err != nil {
 		c.Logger.WithError(err).Error("Failed to verify authorization competition request")
@@ -228,7 +229,12 @@ func (h *Handler) handleConfirmAuthorization(c *Context, w http.ResponseWriter, 
 		return
 	}
 
-	// TODO: delete state after successful confirm
+	err = h.stateCache.DeleteState(state)
+	if err != nil {
+		c.Logger.WithError(err).Error("Failed to cleanup authorization state")
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
 
 	http.Redirect(w, r, chimeraAuthZState.RedirectURI, http.StatusFound)
 }
