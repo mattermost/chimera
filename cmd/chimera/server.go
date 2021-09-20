@@ -32,7 +32,8 @@ func newServeCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().String("addr", "localhost:9876", "Address on which server should be listening.")
+	cmd.Flags().Int("port", 9876, "Port on which server should be listening.")
+	cmd.Flags().String("address", "", "External address of Chimera service.")
 
 	cmd.Flags().String("apps-config", "apps-config.json", "Path to the file containing OAuth apps configuration.")
 	cmd.Flags().String("cache-driver", "inMemory", "Cache driver to be used by application, one of: inMemory, redis.")
@@ -63,8 +64,12 @@ func runServer(opts ServerOptions) error {
 		FullTimestamp: true,
 	})
 
-	logger.Infof("Starting Chimera on: %s", opts.Addr)
-	baseURL := fmt.Sprintf("http://%s", opts.Addr)
+	logger.Infof("Starting Chimera on port: %d", opts.Port)
+
+	if opts.Address == "" {
+		opts.Address = fmt.Sprintf("http://localhost:%d",opts.Port)
+	}
+	logger.Infof("Chimera eternal address: %s", opts.Address)
 
 	appsConfig, err := oauthapps.NewAppsConfigFromFile(opts.AppsConfig)
 	if err != nil {
@@ -81,13 +86,13 @@ func runServer(opts ServerOptions) error {
 		return errors.Wrap(err, "failed to initialize state cache")
 	}
 
-	apps, err := api.OAuthAppsFromConfig(appsConfig.Apps, baseURL)
+	apps, err := api.OAuthAppsFromConfig(appsConfig.Apps, opts.Address)
 	if err != nil {
 		return errors.Wrap(err, "failed to process OAuth apps config")
 	}
 
 	config := api.Config{
-		BaseURL:                  baseURL,
+		BaseURL:                  opts.Address,
 		ConfirmationTemplatePath: opts.ConfirmationTemplatePath,
 		CancelPagePath:           opts.CancelPagePath,
 		CSRFSecret:               []byte(opts.CSRFSecret),
@@ -99,7 +104,7 @@ func runServer(opts ServerOptions) error {
 	}
 
 	srv := &http.Server{
-		Addr:           opts.Addr,
+		Addr:           fmt.Sprintf(":%d", opts.Port),
 		Handler:        apiRouter,
 		ReadTimeout:    180 * time.Second,
 		WriteTimeout:   180 * time.Second,

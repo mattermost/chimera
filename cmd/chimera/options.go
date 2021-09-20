@@ -5,7 +5,8 @@ import (
 )
 
 type ServerOptions struct {
-	Addr                     string
+	Port                     int
+	Address				     string
 	AppsConfig               string `mapstructure:"apps-config"`
 	CacheDriver              string `mapstructure:"cache-driver"`
 	CacheExpiry              string `mapstructure:"cache-expiration"`
