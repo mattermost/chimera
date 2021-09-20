@@ -3,47 +3,66 @@ package api
 import (
 	"context"
 	"fmt"
+	"html/template"
 	"net/http"
 	"net/url"
 
+	"github.com/gorilla/csrf"
 	"github.com/mattermost/chimera/internal/cache"
 
-	"github.com/gorilla/mux"
-	"github.com/mattermost/chimera/internal/providers"
+	"github.com/mattermost/chimera/internal/statuserr"
+	"github.com/pkg/errors"
+
 	"github.com/mattermost/chimera/internal/util"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/oauth2"
 )
 
 const (
-	stateExtensionLength = 16
+	stateExtensionLength                   = 16
+	chimeraAuthorizationVerificationCookie = "chimera_authz_verification"
 )
 
-func NewHandler(appsRegistry map[string]OAuthApp, cache StateCache) *Handler {
-	return &Handler{
-		stateCache:   cache,
-		appsRegistry: appsRegistry,
+func NewHandler(cache StateCache, baseURL *url.URL, confirmFormPath, cancelPagePath string) (*Handler, error) {
+	confirmForm, err := template.ParseFiles(confirmFormPath)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to parse confirmation form template")
 	}
+
+	return &Handler{
+		stateCache:               cache,
+		baseURL:                  baseURL.String(),
+		confirmationFromTemplate: confirmForm,
+		cancelPagePath:           cancelPagePath,
+		useSecureCookie:          useSecureCookies(baseURL),
+	}, nil
 }
 
 type Handler struct {
-	stateCache   StateCache
-	appsRegistry map[string]OAuthApp
+	stateCache               StateCache
+	baseURL                  string
+	confirmationFromTemplate *template.Template
+	cancelPagePath           string
+	useSecureCookie          bool
 }
 
 type StateCache interface {
-	GetRedirectURI(state string) (string, error)
-	SetRedirectURI(state, redirectURI string) error
+	GetRedirectURI(state string) (cache.AuthorizationState, error)
+	SetRedirectURI(state string, authzState cache.AuthorizationState) error
+	DeleteState(state string) error
 }
 
-func (h *Handler) handleAuthorize(c *Context, w http.ResponseWriter, r *http.Request) {
-	app, found := h.getOAuthApp(c, r)
-	if !found {
-		w.WriteHeader(http.StatusNotFound)
-		return
-	}
-	c.Logger = c.Logger.WithField("provider", app.Provider).
-		WithField("app", app.Identifier)
+type AuthFormData struct {
+	RedirectURL    string
+	ConfirmAuthURL string
+	ProviderName   string
+	ProviderURL    string
+	CancelAuthURL  string
+	CsrfField      template.HTML
+}
+
+func (h *Handler) handleAuthorize(c *OAuthAppContext, w http.ResponseWriter, r *http.Request) {
+	c.Logger = loggerWithAppFields(c.Logger, c.OAuthApplication)
 	c.Logger.Infof("Handling authorization")
 
 	redirectURI := r.URL.Query().Get("redirect_uri")
@@ -68,7 +87,7 @@ func (h *Handler) handleAuthorize(c *Context, w http.ResponseWriter, r *http.Req
 	}
 	extendedState := fmt.Sprintf("%s%s", state, util.NewRandomString(stateExtensionLength))
 
-	err := h.stateCache.SetRedirectURI(extendedState, redirectURI)
+	err := h.stateCache.SetRedirectURI(extendedState, cache.AuthorizationState{RedirectURI: redirectURI})
 	if err != nil {
 		c.Logger.WithError(err).Error("Failed to save mapping of state to redirect URI in cache")
 		http.Error(w, "Failed to save state", http.StatusInternalServerError)
@@ -84,7 +103,7 @@ func (h *Handler) handleAuthorize(c *Context, w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	conf := h.makeOAuthConfig(scope, app)
+	conf := h.makeOAuthConfig(scope, c.OAuthApplication)
 
 	authURL := conf.AuthCodeURL(extendedState, oauth2.AccessTypeOffline)
 	c.Logger.Infof("Redirecting to auth URL")
@@ -92,49 +111,133 @@ func (h *Handler) handleAuthorize(c *Context, w http.ResponseWriter, r *http.Req
 	http.Redirect(w, r, authURL, http.StatusFound)
 }
 
-func (h *Handler) handleAuthorizationCallback(c *Context, w http.ResponseWriter, r *http.Request) {
+func (h *Handler) handleAuthorizationCallback(c *OAuthAppContext, w http.ResponseWriter, r *http.Request) {
+	c.Logger = loggerWithAppFields(c.Logger, c.OAuthApplication)
 	c.Logger.Info("Handling authorization callback")
 
 	state := r.URL.Query().Get("state")
 
-	redirectURIRaw, err := h.stateCache.GetRedirectURI(state)
+	chimeraAuthZState, err := h.getAuthZStateFromCache(state)
 	if err != nil {
-		if err == cache.ErrNotFound {
-			c.Logger.Error("State provided to webhook handler not found")
-			w.WriteHeader(http.StatusBadRequest)
-		} else {
-			c.Logger.Error("Failed to get state from cache")
-			w.WriteHeader(http.StatusInternalServerError)
-		}
+		c.Logger.WithError(err).Error("Failed to get redirect URI from cache")
+		w.WriteHeader(statuserr.ErrToStatus(err))
 		return
 	}
 
-	redirectURI, err := url.Parse(redirectURIRaw)
+	redirectURI, err := url.Parse(chimeraAuthZState.RedirectURI)
 	if err != nil {
 		c.Logger.Error("Failed to parse destination site URL")
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
 
+	// Update redirect URI with params returned from OAuth provider such as `authorization_code`.
 	originalState := state[:len(state)-stateExtensionLength]
-
 	query := r.URL.Query()
 	query.Set("state", originalState)
-
 	redirectURI.RawQuery = query.Encode()
-	c.Logger.Info("Redirecting authorization callback")
 
-	http.Redirect(w, r, redirectURI.String(), http.StatusFound)
-}
+	redirectURIStr := redirectURI.String()
 
-func (h *Handler) handleTokenExchange(c *Context, w http.ResponseWriter, r *http.Request) {
-	app, found := h.getOAuthApp(c, r)
-	if !found {
-		w.WriteHeader(http.StatusNotFound)
+	verificationToken := util.NewRandomString(32)
+	err = h.stateCache.SetRedirectURI(state, cache.AuthorizationState{RedirectURI: redirectURIStr, AuthorizationVerificationToken: verificationToken})
+	if err != nil {
+		c.Logger.Error("Failed to update redirect URL in cache")
+		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
-	c.Logger = c.Logger.WithField("provider", app.Provider).
-		WithField("app", app.Identifier)
+
+	c.Logger.Info("Redirecting authorization callback to confirmation")
+	http.Redirect(w, r, fmt.Sprintf("%s/v1/%s/%s/auth/chimera/confirm?state=%s", h.baseURL, c.OAuthApplication.Provider, c.OAuthApplication.Identifier, state), http.StatusFound)
+}
+
+func (h *Handler) handleGetConfirmAuthorization(c *OAuthAppContext, w http.ResponseWriter, r *http.Request) {
+	c.Logger = loggerWithAppFields(c.Logger, c.OAuthApplication)
+	c.Logger.Info("Handling request for confirmation of Chimera authZ")
+
+	state := r.URL.Query().Get("state")
+	fmt.Println("Handle confirm state: ", state)
+
+	chimeraAuthZState, err := h.getAuthZStateFromCache(state)
+	if err != nil {
+		c.Logger.WithError(err).Error("Failed to get redirect URI from cache")
+		w.WriteHeader(statuserr.ErrToStatus(err))
+		return
+	}
+
+	// Strip URL query for cleaner display
+	strippedURL, err := stripURLQuery(chimeraAuthZState.RedirectURI)
+	if err != nil {
+		c.Logger.Error("Failed to strip query from redirect URL")
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	data := AuthFormData{
+		RedirectURL:    strippedURL,
+		ConfirmAuthURL: fmt.Sprintf("%s/v1/%s/%s/auth/chimera/confirm?state=%s", h.baseURL, c.OAuthApplication.Provider, c.OAuthApplication.Identifier, state),
+		ProviderName:   c.OAuthApplication.Provider.DisplayName(),
+		ProviderURL:    c.OAuthApplication.Provider.HomepageURL(),
+		CancelAuthURL:  fmt.Sprintf("%s/v1/auth/chimera/cancel?state=%s", h.baseURL, state),
+		CsrfField:      csrf.TemplateField(r),
+	}
+
+	c.Logger.Info("Displaying authZ confirmation from")
+	http.SetCookie(w, h.chimeraAuthZTokenCookie(chimeraAuthZState.AuthorizationVerificationToken))
+	w.Header().Set("X-Frame-Options", "DENY")
+	w.WriteHeader(http.StatusOK)
+	err = h.confirmationFromTemplate.Execute(w, data)
+	if err != nil {
+		c.Logger.WithError(err).Error("Failed to send confirmation from")
+	}
+}
+
+func (h *Handler) handleConfirmAuthorization(c *OAuthAppContext, w http.ResponseWriter, r *http.Request) {
+	c.Logger = loggerWithAppFields(c.Logger, c.OAuthApplication)
+	c.Logger.Info("Handling request for confirmation of Chimera authZ")
+
+	state := r.URL.Query().Get("state")
+	chimeraAuthZState, err := h.verifyAuthorizationCompletion(r)
+	if err != nil {
+		c.Logger.WithError(err).Error("Failed to verify authorization competition request")
+		w.WriteHeader(statuserr.ErrToStatus(err))
+		return
+	}
+
+	err = h.stateCache.DeleteState(state)
+	if err != nil {
+		c.Logger.WithError(err).Error("Failed to cleanup authorization state")
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	http.Redirect(w, r, chimeraAuthZState.RedirectURI, http.StatusFound)
+}
+
+func (h *Handler) handleCancelAuthorization(c *Context, w http.ResponseWriter, r *http.Request) {
+	c.Logger.Info("Handling request for canceling of Chimera authZ")
+
+	state := r.URL.Query().Get("state")
+	_, err := h.verifyAuthorizationCompletion(r)
+	if err != nil {
+		c.Logger.WithError(err).Error("Failed to verify authorization cancellation request")
+		w.WriteHeader(statuserr.ErrToStatus(err))
+		return
+	}
+
+	err = h.stateCache.DeleteState(state)
+	if err != nil {
+		c.Logger.WithError(err).Error("Failed to delete state")
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	c.Logger.Info("Authorization canceled")
+	http.ServeFile(w, r, h.cancelPagePath)
+}
+
+func (h *Handler) handleTokenExchange(c *OAuthAppContext, w http.ResponseWriter, r *http.Request) {
+	c.Logger = loggerWithAppFields(c.Logger, c.OAuthApplication)
 	c.Logger.Infof("Handling token exchange")
 
 	clientID, clientSecret, ok := r.BasicAuth()
@@ -154,7 +257,7 @@ func (h *Handler) handleTokenExchange(c *Context, w http.ResponseWriter, r *http
 	if !found {
 		scope = []string{}
 	}
-	conf := h.makeOAuthConfig(scope, app)
+	conf := h.makeOAuthConfig(scope, c.OAuthApplication)
 
 	err := r.ParseForm()
 	if err != nil {
@@ -185,36 +288,6 @@ func (h *Handler) handleTokenExchange(c *Context, w http.ResponseWriter, r *http
 	writeJSON(w, token, &Context{Logger: logrus.New()})
 }
 
-func (h *Handler) getOAuthApp(c *Context, r *http.Request) (OAuthApp, bool) {
-	vars := mux.Vars(r)
-	prov, found := vars["provider"]
-	if !found {
-		return OAuthApp{}, false
-	}
-	oauthProvider := providers.OAuthProvider(prov)
-	if !providers.ContainsProvider(providers.ValidProviders, oauthProvider) {
-		c.Logger.Warnf("Unsupported provider: %q", oauthProvider)
-		return OAuthApp{}, false
-	}
-
-	appID, found := vars["app"]
-	if !found {
-		return OAuthApp{}, false
-	}
-	app, found := h.appsRegistry[appID]
-	if !found {
-		c.Logger.Warnf("App %q not found", appID)
-		return OAuthApp{}, false
-	}
-
-	if app.Provider != oauthProvider {
-		c.Logger.Warn("App ID does not match provider")
-		return OAuthApp{}, false
-	}
-
-	return app, true
-}
-
 func (h *Handler) makeOAuthConfig(scope []string, app OAuthApp) *oauth2.Config {
 	return &oauth2.Config{
 		ClientID:     app.ClientID,
@@ -223,4 +296,58 @@ func (h *Handler) makeOAuthConfig(scope []string, app OAuthApp) *oauth2.Config {
 		Endpoint:     app.OAuthURLs.Endpoint(),
 		RedirectURL:  app.OAuthURLs.RedirectURL(),
 	}
+}
+
+func (h *Handler) getAuthZStateFromCache(state string) (cache.AuthorizationState, error) {
+	authzState, err := h.stateCache.GetRedirectURI(state)
+	if err != nil {
+		if err == cache.ErrNotFound {
+			return cache.AuthorizationState{}, statuserr.ErrWrap(http.StatusBadRequest, err, "state provided to webhook handler not found in cache")
+		}
+		return cache.AuthorizationState{}, statuserr.ErrWrap(http.StatusInternalServerError, err, "failed to get chimera authZ state from cache")
+	}
+
+	return authzState, nil
+}
+
+func (h *Handler) verifyAuthorizationCompletion(r *http.Request) (cache.AuthorizationState, error) {
+	state := r.URL.Query().Get("state")
+	authZVerificationTokenCookie, err := r.Cookie(chimeraAuthorizationVerificationCookie)
+	if err != nil {
+		return cache.AuthorizationState{}, statuserr.ErrWrap(http.StatusBadRequest, err, "chimera authZ cookie not provided")
+	}
+
+	chimeraAuthZState, err := h.getAuthZStateFromCache(state)
+	if err != nil {
+		return cache.AuthorizationState{}, errors.Wrap(err, "failed to get redirect URI from cache")
+	}
+	// If the verification token has not been set, the authorization callback from provider did not happen yet
+	if chimeraAuthZState.AuthorizationVerificationToken == "" {
+		return cache.AuthorizationState{}, statuserr.NewErr(http.StatusBadRequest, errors.New("attempt to confirm authorization that has not happen from provider side"))
+	}
+
+	if authZVerificationTokenCookie.Value != chimeraAuthZState.AuthorizationVerificationToken {
+		return cache.AuthorizationState{}, statuserr.NewErr(http.StatusBadRequest, errors.New("authorization token from Cookie does not match the one in Chimera state"))
+	}
+
+	return chimeraAuthZState, nil
+}
+
+func (h *Handler) chimeraAuthZTokenCookie(token string) *http.Cookie {
+	return &http.Cookie{Name: chimeraAuthorizationVerificationCookie, Value: token, Path: "/v1", Secure: h.useSecureCookie}
+}
+
+func stripURLQuery(rawURL string) (string, error) {
+	redirectURI, err := url.Parse(rawURL)
+	if err != nil {
+		return "", err
+	}
+	redirectURI.RawQuery = ""
+
+	return redirectURI.String(), nil
+}
+
+func loggerWithAppFields(logger logrus.FieldLogger, app OAuthApp) logrus.FieldLogger {
+	return logger.WithField("provider", app.Provider).
+		WithField("app", app.Identifier)
 }
