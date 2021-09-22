@@ -49,7 +49,6 @@ func Test_HandleAuthorize(t *testing.T) {
 	cfg := Config{
 		BaseURL:                  "https://chimera",
 		ConfirmationTemplatePath: "testdata/test-form.html",
-		CSRFSecret:               []byte("secret"),
 	}
 
 	stateCache := cache.NewInMemoryCache(10 * time.Minute)
@@ -159,7 +158,6 @@ func Test_HandleFullAuthorization(t *testing.T) {
 		BaseURL:                  fmt.Sprintf("http://%s", server.Listener.Addr().String()),
 		ConfirmationTemplatePath: "testdata/test-form.html",
 		CancelPagePath:           "testdata/test-cancel-page.html",
-		CSRFSecret:               []byte("secret"),
 	}
 
 	router, err := RegisterAPI(&Context{Logger: logrus.New()}, oauthApps, stateCache, cfg)
@@ -383,7 +381,6 @@ func Test_HandleExchangeToken(t *testing.T) {
 	cfg := Config{
 		BaseURL:                  "https://chimera",
 		ConfirmationTemplatePath: "testdata/test-form.html",
-		CSRFSecret:               []byte("secret"),
 	}
 
 	router, err := RegisterAPI(&Context{Logger: logrus.New()}, oauthApps, cache.NewInMemoryCache(10*time.Minute), cfg)
