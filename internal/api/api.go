@@ -17,7 +17,6 @@ type Config struct {
 	BaseURL                  string
 	ConfirmationTemplatePath string
 	CancelPagePath           string
-	CSRFSecret               []byte
 }
 
 // RegisterAPI registers the API endpoints on the given router.
@@ -36,7 +35,9 @@ func RegisterAPI(context *Context, oauthApps map[string]OAuthApp, cache StateCac
 		return nil, errors.Wrap(err, "failed to parse base URL")
 	}
 
-	csrfHandler := csrf.Protect(cfg.CSRFSecret, csrf.Secure(useSecureCookies(baseURL)), csrf.Path("/v1"))
+	// Secret passed to the CSRF handler is used for generating and verifying HMAC of Cookies values
+	// which in case of CSRF cookies is not necessary, therefore the value is hardcoded.
+	csrfHandler := csrf.Protect([]byte("not-secret"), csrf.Secure(useSecureCookies(baseURL)), csrf.Path("/v1"))
 
 	v1Router := rootRouter.PathPrefix("/v1").Subrouter()
 
@@ -66,8 +67,5 @@ func writeJSON(w http.ResponseWriter, v interface{}, c *Context) {
 }
 
 func useSecureCookies(baseURL *url.URL) bool {
-	if baseURL.Scheme == "http" {
-		return false
-	}
-	return true
+	return baseURL.Scheme != "http"
 }
