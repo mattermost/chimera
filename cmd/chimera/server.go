@@ -42,6 +42,7 @@ func newServeCmd() *cobra.Command {
 	cmd.Flags().Int("redis-database", 0, "Redis database.")
 	cmd.Flags().String("confirmation-template-path", "html/confirm-auth-form.html", "HTML template for authorization confirmation form.")
 	cmd.Flags().String("cancel-page-path", "html/cancel-auth.html", "HTML page displayed when canceling authorization.")
+	cmd.Flags().String("styles-file-path", "static/styles.css", "Path to file that contains CSS styles.")
 	cmd.Flags().String("log-level", "info", "Log level used by Chimera.")
 
 	return cmd
@@ -93,6 +94,7 @@ func runServer(opts ServerOptions) error {
 		BaseURL:                  opts.Address,
 		ConfirmationTemplatePath: opts.ConfirmationTemplatePath,
 		CancelPagePath:           opts.CancelPagePath,
+		StylesFilePath:           opts.StylesFilePath,
 	}
 
 	apiRouter, err := api.RegisterAPI(&api.Context{Logger: logger}, apps, stateCache, config)

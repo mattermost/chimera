@@ -65,10 +65,17 @@ func (h *Handler) handleAuthorize(c *OAuthAppContext, w http.ResponseWriter, r *
 	c.Logger = loggerWithAppFields(c.Logger, c.OAuthApplication)
 	c.Logger.Infof("Handling authorization")
 
-	redirectURI := r.URL.Query().Get("redirect_uri")
-	if redirectURI == "" {
+	redirectURIRaw := r.URL.Query().Get("redirect_uri")
+	if redirectURIRaw == "" {
 		c.Logger.Warn("redirect_uri not present in authorize request")
 		http.Error(w, "Redirect_uri needs to be specified", http.StatusBadRequest)
+		return
+	}
+
+	err := validateRedirectURI(redirectURIRaw)
+	if err != nil {
+		c.Logger.WithError(err).Warn("invalid redirect_uri in authorize request")
+		http.Error(w, "Invalid redirect_uri", http.StatusBadRequest)
 		return
 	}
 
@@ -87,7 +94,7 @@ func (h *Handler) handleAuthorize(c *OAuthAppContext, w http.ResponseWriter, r *
 	}
 	extendedState := fmt.Sprintf("%s%s", state, util.NewRandomString(stateExtensionLength))
 
-	err := h.stateCache.SetRedirectURI(extendedState, cache.AuthorizationState{RedirectURI: redirectURI})
+	err = h.stateCache.SetRedirectURI(extendedState, cache.AuthorizationState{RedirectURI: redirectURIRaw})
 	if err != nil {
 		c.Logger.WithError(err).Error("Failed to save mapping of state to redirect URI in cache")
 		http.Error(w, "Failed to save state", http.StatusInternalServerError)
@@ -184,7 +191,6 @@ func (h *Handler) handleGetConfirmAuthorization(c *OAuthAppContext, w http.Respo
 
 	c.Logger.Info("Displaying authZ confirmation from")
 	http.SetCookie(w, h.chimeraAuthZTokenCookie(chimeraAuthZState.AuthorizationVerificationToken))
-	w.Header().Set("X-Frame-Options", "DENY")
 	w.WriteHeader(http.StatusOK)
 	err = h.confirmationFromTemplate.Execute(w, data)
 	if err != nil {
@@ -335,6 +341,20 @@ func (h *Handler) verifyAuthorizationCompletion(r *http.Request) (cache.Authoriz
 
 func (h *Handler) chimeraAuthZTokenCookie(token string) *http.Cookie {
 	return &http.Cookie{Name: chimeraAuthorizationVerificationCookie, Value: token, Path: "/v1", Secure: h.useSecureCookie}
+}
+
+func validateRedirectURI(rawURL string) error {
+	redirectURI, err := url.Parse(rawURL)
+	if err != nil {
+		return errors.Wrap(err, "failed to parse redirect_uri")
+	}
+	if redirectURI.Scheme != "https" && redirectURI.Scheme != "http" {
+		return errors.Errorf("invalid redirect_uri schema: %s", redirectURI.Scheme)
+	}
+	if redirectURI.Opaque != "" {
+		return errors.Errorf("redirect_uri contains opaque data: %s", rawURL)
+	}
+	return nil
 }
 
 func stripURLQuery(rawURL string) (string, error) {

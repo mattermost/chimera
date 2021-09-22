@@ -17,17 +17,23 @@ type Config struct {
 	BaseURL                  string
 	ConfirmationTemplatePath string
 	CancelPagePath           string
+	StylesFilePath           string
 }
 
 // RegisterAPI registers the API endpoints on the given router.
 func RegisterAPI(context *Context, oauthApps map[string]OAuthApp, cache StateCache, cfg Config) (*mux.Router, error) {
 	rootRouter := mux.NewRouter()
+	rootRouter.Use(commonHeadersMiddleware)
 
 	rootRouter.Handle("/metrics", promhttp.Handler())
 
 	rootRouter.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("Ok"))
+	})
+
+	rootRouter.HandleFunc("/static/styles.css", func(w http.ResponseWriter, r *http.Request) {
+		http.ServeFile(w, r, cfg.StylesFilePath)
 	})
 
 	baseURL, err := url.Parse(cfg.BaseURL)
@@ -56,6 +62,15 @@ func RegisterAPI(context *Context, oauthApps map[string]OAuthApp, cache StateCac
 	oauthRouter.Handle("/oauth/token", addOAuthAppCtx(context.Clone(), handler.handleTokenExchange, oauthApps)).Methods(http.MethodPost)
 
 	return rootRouter, nil
+}
+
+func commonHeadersMiddleware(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; font-src fonts.gstatic.com; style-src 'self' fonts.googleapis.com")
+
+		h.ServeHTTP(w, r)
+	})
 }
 
 func writeJSON(w http.ResponseWriter, v interface{}, c *Context) {

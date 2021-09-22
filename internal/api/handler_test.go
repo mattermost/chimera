@@ -90,15 +90,36 @@ func Test_HandleAuthorize(t *testing.T) {
 	assert.Contains(t, location.Query().Get("state"), "some-state")
 	assert.True(t, strings.HasPrefix(location.String(), "https://github.com/login/oauth/authorize"))
 
-	t.Run("fail if no redirect_uri", func(t *testing.T) {
-		authURL.RawQuery = url.Values{
-			"client_id": {"dummy-id"},
-			"state":     {"some-state"},
-		}.Encode()
+	t.Run("invalid redirect_uri", func(t *testing.T) {
+		for _, testCase := range []struct {
+			description string
+			redirectURI string
+		}{
+			{
+				description: "invalid URL",
+				redirectURI: "http://not valid.com",
+			},
+			{
+				description: "invalid schema",
+				redirectURI: "ssh://my-mm.com",
+			},
+			{
+				description: "contains opaque char",
+				redirectURI: "https:\\u0020my-mm.com",
+			},
+		} {
+			t.Run(testCase.description, func(t *testing.T) {
+				authURL.RawQuery = url.Values{
+					"redirect_uri": {testCase.redirectURI},
+					"client_id":    {"dummy-id"},
+					"state":        {"some-state"},
+				}.Encode()
 
-		req, err := http.NewRequest(http.MethodGet, authURL.String(), nil)
-		require.NoError(t, err)
-		_ = assertRespStatus(t, client, req, http.StatusBadRequest)
+				req, err := http.NewRequest(http.MethodGet, authURL.String(), nil)
+				require.NoError(t, err)
+				assertRespStatus(t, client, req, http.StatusBadRequest)
+			})
+		}
 	})
 
 	t.Run("fail if to short state", func(t *testing.T) {
