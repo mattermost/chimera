@@ -1,3 +1,5 @@
+.PHONY: build test
+
 DOCKER_BUILDER_IMAGE = golang:1.16
 DOCKER_BASE_IMAGE = gcr.io/distroless/static:nonroot
 

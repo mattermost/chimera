@@ -1,0 +1,38 @@
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    <title>Confirm Chimera Authorization</title>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+
+<div class="wrapper">
+    <div id="formContent">
+        <h2 class="active"> Confirm Authorization </h2>
+
+        <div class="info">
+            You are about to authorize <a class="providerName" href='{{ .ProviderURL }}'>{{ .ProviderName }}</a> OAuth application with Chimera.
+            </br>
+            <b>Please ensure that redirect URL is correct!</b>
+        </div>
+        <div class="redirectURLWrapper">
+            <div>Redirect URL:</div>
+            <div class="redirectURL">{{ .RedirectURL }}</div>
+        </div>
+
+        <form class="from" action={{ .CancelAuthURL }} method="post">
+            {{ .CsrfField }}
+            <input class="cancelButton" autofocus type="submit" value="Cancel"/>
+        </form>
+        <form class="from" action={{ .ConfirmAuthURL }} method="post">
+            {{ .CsrfField }}
+            <input class="confirmButton" type="submit" value="Confirm" />
+        </form>
+
+    </div>
+</div>
+
+</body>
+</html>

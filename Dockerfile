@@ -16,6 +16,8 @@ FROM ${DOCKER_BASE_IMAGE}
 
 WORKDIR /
 COPY --from=builder /chimera/LICENSE .
+COPY --from=builder /chimera/html html
+COPY --from=builder /chimera/static static
 COPY --from=builder /chimera/build/_output/bin/chimera .
 
 USER nonroot:nonroot
