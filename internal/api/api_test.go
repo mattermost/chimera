@@ -8,6 +8,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gorilla/mux"
+	"github.com/mattermost/chimera/internal/metrics"
+
 	"github.com/mattermost/chimera/internal/cache"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
@@ -15,8 +18,7 @@ import (
 )
 
 func TestAPI_HealthCheck(t *testing.T) {
-	router, err := RegisterAPI(&Context{Logger: logrus.New()}, map[string]OAuthApp{}, cache.NewInMemoryCache(10*time.Minute), Config{ConfirmationTemplatePath: "testdata/test-form.html"})
-	require.NoError(t, err)
+	router := registerTestAPI(t)
 	server := httptest.NewServer(router)
 	defer server.Close()
 
@@ -28,8 +30,7 @@ func TestAPI_HealthCheck(t *testing.T) {
 }
 
 func Test_Static(t *testing.T) {
-	router, err := RegisterAPI(&Context{Logger: logrus.New()}, map[string]OAuthApp{}, cache.NewInMemoryCache(10*time.Minute), Config{ConfirmationTemplatePath: "testdata/test-form.html", StylesFilePath: "testdata/styles.css"})
-	require.NoError(t, err)
+	router := registerTestAPI(t)
 	server := httptest.NewServer(router)
 	defer server.Close()
 
@@ -47,4 +48,15 @@ func Test_Static(t *testing.T) {
 func assertCommonHeaders(t *testing.T, resp *http.Response) {
 	assert.Equal(t, "DENY", resp.Header.Get("X-Frame-Options"))
 	assert.Equal(t, "default-src 'self'; font-src fonts.gstatic.com; style-src 'self' fonts.googleapis.com", resp.Header.Get("Content-Security-Policy"))
+}
+
+func registerTestAPI(t *testing.T) *mux.Router {
+	router, err := RegisterAPI(
+		&Context{Logger: logrus.New()},
+		map[string]OAuthApp{},
+		cache.NewInMemoryCache(10*time.Minute),
+		metrics.NewCollector(logrus.New()),
+		Config{ConfirmationTemplatePath: "testdata/test-form.html", StylesFilePath: "testdata/styles.css"})
+	require.NoError(t, err)
+	return router
 }

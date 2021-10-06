@@ -5,12 +5,13 @@ import (
 	"net/http"
 	"net/url"
 
+	"github.com/mattermost/chimera/internal/metrics"
+
 	"github.com/gorilla/csrf"
 
 	"github.com/pkg/errors"
 
 	"github.com/gorilla/mux"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 type Config struct {
@@ -21,11 +22,9 @@ type Config struct {
 }
 
 // RegisterAPI registers the API endpoints on the given router.
-func RegisterAPI(context *Context, oauthApps map[string]OAuthApp, cache StateCache, cfg Config) (*mux.Router, error) {
+func RegisterAPI(context *Context, oauthApps map[string]OAuthApp, cache StateCache, metrics *metrics.Collector, cfg Config) (*mux.Router, error) {
 	rootRouter := mux.NewRouter()
 	rootRouter.Use(commonHeadersMiddleware)
-
-	rootRouter.Handle("/metrics", promhttp.Handler())
 
 	rootRouter.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -46,6 +45,7 @@ func RegisterAPI(context *Context, oauthApps map[string]OAuthApp, cache StateCac
 	csrfHandler := csrf.Protect([]byte("not-secret"), csrf.Secure(useSecureCookies(baseURL)), csrf.Path("/v1"))
 
 	v1Router := rootRouter.PathPrefix("/v1").Subrouter()
+	v1Router.Use(metrics.MetricsMiddleware)
 
 	handler, err := NewHandler(cache, baseURL, cfg.ConfirmationTemplatePath, cfg.CancelPagePath)
 	if err != nil {

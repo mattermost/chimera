@@ -11,10 +11,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mattermost/chimera/internal/metrics"
+
 	"golang.org/x/net/html"
 
 	"github.com/mattermost/chimera/internal/cache"
 	"github.com/mattermost/chimera/internal/oauthapps"
+
+	prommodel "github.com/prometheus/client_model/go"
 
 	"github.com/mattermost/chimera/internal/providers"
 	"github.com/sirupsen/logrus"
@@ -50,9 +54,10 @@ func Test_HandleAuthorize(t *testing.T) {
 		BaseURL:                  "https://chimera",
 		ConfirmationTemplatePath: "testdata/test-form.html",
 	}
+	metricsCollector := metrics.NewCollector(logrus.New())
 
 	stateCache := cache.NewInMemoryCache(10 * time.Minute)
-	router, err := RegisterAPI(&Context{Logger: logrus.New()}, oauthApps, stateCache, cfg)
+	router, err := RegisterAPI(&Context{Logger: logrus.New()}, oauthApps, stateCache, metricsCollector, cfg)
 	require.NoError(t, err)
 	server := httptest.NewServer(router)
 	defer server.Close()
@@ -157,6 +162,23 @@ func Test_HandleAuthorize(t *testing.T) {
 		require.NoError(t, err)
 		_ = assertRespStatus(t, client, req, http.StatusNotFound)
 	})
+
+	t.Run("assert metrics recorded", func(t *testing.T) {
+		metricRecords, err := metricsCollector.Registry.Gather()
+		require.NoError(t, err)
+
+		assertCounterMetric(t,
+			metricRecords,
+			"chimera_http_response_status",
+			map[string]string{"method": "GET", "path": "/v1/github/github-plugin/oauth/authorize", "status": "302"},
+			1,
+		)
+		assertHistogramMetricObserved(t,
+			metricRecords,
+			"chimera_http_response_time_seconds",
+			map[string]string{"method": "GET", "path": "/v1/github/github-plugin/oauth/authorize"},
+		)
+	})
 }
 
 func Test_HandleFullAuthorization(t *testing.T) {
@@ -174,6 +196,7 @@ func Test_HandleFullAuthorization(t *testing.T) {
 
 	stateCache := cache.NewInMemoryCache(10 * time.Minute)
 	server := httptest.NewUnstartedServer(nil)
+	metricsCollector := metrics.NewCollector(logrus.New())
 
 	cfg := Config{
 		BaseURL:                  fmt.Sprintf("http://%s", server.Listener.Addr().String()),
@@ -181,7 +204,7 @@ func Test_HandleFullAuthorization(t *testing.T) {
 		CancelPagePath:           "testdata/test-cancel-page.html",
 	}
 
-	router, err := RegisterAPI(&Context{Logger: logrus.New()}, oauthApps, stateCache, cfg)
+	router, err := RegisterAPI(&Context{Logger: logrus.New()}, oauthApps, stateCache, metricsCollector, cfg)
 	require.NoError(t, err)
 	server.Config = &http.Server{Handler: router}
 	server.Start()
@@ -398,13 +421,14 @@ func Test_HandleExchangeToken(t *testing.T) {
 			OAuthURLs: mockURLs,
 		},
 	}
+	metricsCollector := metrics.NewCollector(logrus.New())
 
 	cfg := Config{
 		BaseURL:                  "https://chimera",
 		ConfirmationTemplatePath: "testdata/test-form.html",
 	}
 
-	router, err := RegisterAPI(&Context{Logger: logrus.New()}, oauthApps, cache.NewInMemoryCache(10*time.Minute), cfg)
+	router, err := RegisterAPI(&Context{Logger: logrus.New()}, oauthApps, cache.NewInMemoryCache(10*time.Minute), metricsCollector, cfg)
 	require.NoError(t, err)
 	router.HandleFunc("/mock-token", func(writer http.ResponseWriter, request *http.Request) {
 		writer.Header().Set("Content-Type", "application/json")
@@ -454,6 +478,23 @@ func Test_HandleExchangeToken(t *testing.T) {
 		req.SetBasicAuth("test", "test")
 
 		_ = assertRespStatus(t, http.DefaultClient, req, http.StatusBadRequest)
+	})
+
+	t.Run("assert metrics recorded", func(t *testing.T) {
+		metricRecords, err := metricsCollector.Registry.Gather()
+		require.NoError(t, err)
+
+		assertCounterMetric(t,
+			metricRecords,
+			"chimera_http_response_status",
+			map[string]string{"method": "POST", "path": "/v1/github/github-plugin/oauth/token", "status": "200"},
+			1,
+		)
+		assertHistogramMetricObserved(t,
+			metricRecords,
+			"chimera_http_response_time_seconds",
+			map[string]string{"method": "POST", "path": "/v1/github/github-plugin/oauth/token"},
+		)
 	})
 }
 
@@ -511,4 +552,52 @@ func extractCSRFToken(t *testing.T, htmlNode string) string {
 func setCSRF(r *http.Request, cookie *http.Cookie, csrfToken string) {
 	r.AddCookie(cookie)
 	r.Header.Set("X-CSRF-Token", csrfToken)
+}
+
+// Metrics test helpers
+
+func assertHistogramMetricObserved(t *testing.T, records []*prommodel.MetricFamily, name string, labels map[string]string) {
+	metric := getMetric(t, records, name, labels)
+	require.NotNil(t, metric.Histogram.SampleCount)
+	assert.True(t, *metric.Histogram.SampleCount > 0)
+}
+
+func assertCounterMetric(t *testing.T, records []*prommodel.MetricFamily, name string, labels map[string]string, value float64) {
+	metric := getMetric(t, records, name, labels)
+	require.NotNil(t, metric.Counter.Value)
+	assert.Equal(t, value, *metric.Counter.Value)
+}
+
+func getMetric(t *testing.T, records []*prommodel.MetricFamily, name string, labels map[string]string) *prommodel.Metric {
+	metricFamily := getMetricFamily(records, name)
+	require.NotNil(t, metricFamily)
+	metric := getMetricMatchingLabels(metricFamily.Metric, labels)
+	require.NotNil(t, metricFamily)
+	return metric
+}
+
+func getMetricFamily(records []*prommodel.MetricFamily, name string) *prommodel.MetricFamily {
+	for _, r := range records {
+		if *r.Name == name {
+			return r
+		}
+	}
+	return nil
+}
+
+// getMetricMatchingLabels returns metric that matches all labels or nil.
+func getMetricMatchingLabels(allMetrics []*prommodel.Metric, labels map[string]string) *prommodel.Metric {
+	for _, m := range allMetrics {
+		metricLabels := m.GetLabel()
+		toFind := len(labels)
+		for _, ml := range metricLabels {
+			if labels[*ml.Name] == *ml.Value {
+				toFind--
+			}
+		}
+		if toFind == 0 {
+			return m
+		}
+	}
+	return nil
 }

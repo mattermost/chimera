@@ -6,6 +6,7 @@ import (
 
 type ServerOptions struct {
 	Port                     int
+	MetricsPort              int `mapstructure:"metrics-port"`
 	Address                  string
 	AppsConfig               string `mapstructure:"apps-config"`
 	CacheDriver              string `mapstructure:"cache-driver"`
