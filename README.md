@@ -15,7 +15,7 @@ Thanks to Chimera, users can skip registration of their own OAuth2 applications 
 Current support for Chimera in Mattermost plugins.
 
 | Plugin | Chimera Support Status |
-|--------|--------|-------|
+|--------|---------------|
 | [GitHub Plugin](https://github.com/mattermost/mattermost-plugin-github) | In Progress |
 | [GitLab Plugin](https://github.com/mattermost/mattermost-plugin-gitlab) | In Progress |
 | [Zoom Plugin](https://github.com/mattermost/mattermost-plugin-zoom) | In Progress |

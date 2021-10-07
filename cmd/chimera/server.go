@@ -11,6 +11,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/mattermost/chimera/internal/metrics"
+
 	"github.com/mattermost/chimera/internal/api"
 	"github.com/mattermost/chimera/internal/cache"
 	"github.com/mattermost/chimera/internal/oauthapps"
@@ -33,6 +35,7 @@ func newServeCmd() *cobra.Command {
 	}
 
 	cmd.Flags().Int("port", 9876, "Port on which server should be listening.")
+	cmd.Flags().Int("metrics-port", 9877, "Port on which metrics server should be listening.")
 	cmd.Flags().String("address", "", "External address of Chimera service.")
 	cmd.Flags().String("apps-config", "apps-config.json", "Path to the file containing OAuth apps configuration.")
 	cmd.Flags().String("cache-driver", "inMemory", "Cache driver to be used by application, one of: inMemory, redis.")
@@ -90,6 +93,8 @@ func runServer(opts ServerOptions) error {
 		return errors.Wrap(err, "failed to process OAuth apps config")
 	}
 
+	metricsCollector := metrics.NewCollector(logger.WithField("component", "metrics"))
+
 	config := api.Config{
 		BaseURL:                  opts.Address,
 		ConfirmationTemplatePath: opts.ConfirmationTemplatePath,
@@ -97,7 +102,7 @@ func runServer(opts ServerOptions) error {
 		StylesFilePath:           opts.StylesFilePath,
 	}
 
-	apiRouter, err := api.RegisterAPI(&api.Context{Logger: logger}, apps, stateCache, config)
+	apiRouter, err := api.RegisterAPI(&api.Context{Logger: logger}, apps, stateCache, metricsCollector, config)
 	if err != nil {
 		return errors.Wrap(err, "failed to register API")
 	}
@@ -120,6 +125,25 @@ func runServer(opts ServerOptions) error {
 		}
 	}()
 
+	// Start metrics server on different port for easier separation.
+	metricsServer := &http.Server{
+		Addr:           fmt.Sprintf(":%d", opts.MetricsPort),
+		Handler:        metricsCollector.MetricsHandler(),
+		ReadTimeout:    180 * time.Second,
+		WriteTimeout:   180 * time.Second,
+		IdleTimeout:    time.Second * 180,
+		MaxHeaderBytes: 1 << 20,
+		ErrorLog:       log.New(&logrusWriter{logger: logger}, "", 0),
+	}
+
+	go func() {
+		logger.WithField("addr", metricsServer.Addr).Info("Metrics server listening")
+		err := metricsServer.ListenAndServe()
+		if err != nil && err != http.ErrServerClosed {
+			logger.WithError(err).Error("Failed to listen and serve metrics")
+		}
+	}()
+
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
 
@@ -131,6 +155,10 @@ func runServer(opts ServerOptions) error {
 	err = srv.Shutdown(ctx)
 	if err != nil {
 		logger.WithError(err).Error("Failed to shut down gracefully")
+	}
+	err = metricsServer.Shutdown(ctx)
+	if err != nil {
+		logger.WithError(err).Error("Failed to shut down metrics server gracefully")
 	}
 
 	return nil
