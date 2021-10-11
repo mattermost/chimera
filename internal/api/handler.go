@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"net/url"
 
+	"github.com/mattermost/chimera/internal/metrics"
+
 	"github.com/gorilla/csrf"
 	"github.com/mattermost/chimera/internal/cache"
 
@@ -23,7 +25,7 @@ const (
 	chimeraAuthorizationVerificationCookie = "chimera_authz_verification"
 )
 
-func NewHandler(cache StateCache, baseURL *url.URL, confirmFormPath, cancelPagePath string) (*Handler, error) {
+func NewHandler(cache StateCache, baseURL *url.URL, confirmFormPath, cancelPagePath string, metricsCollector *metrics.Collector) (*Handler, error) {
 	confirmForm, err := template.ParseFiles(confirmFormPath)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to parse confirmation form template")
@@ -35,6 +37,7 @@ func NewHandler(cache StateCache, baseURL *url.URL, confirmFormPath, cancelPageP
 		confirmationFromTemplate: confirmForm,
 		cancelPagePath:           cancelPagePath,
 		useSecureCookie:          useSecureCookies(baseURL),
+		metricsCollector:         metricsCollector,
 	}, nil
 }
 
@@ -44,6 +47,7 @@ type Handler struct {
 	confirmationFromTemplate *template.Template
 	cancelPagePath           string
 	useSecureCookie          bool
+	metricsCollector         *metrics.Collector
 }
 
 type StateCache interface {
@@ -113,8 +117,10 @@ func (h *Handler) handleAuthorize(c *OAuthAppContext, w http.ResponseWriter, r *
 	conf := h.makeOAuthConfig(scope, c.OAuthApplication)
 
 	authURL := conf.AuthCodeURL(extendedState, oauth2.AccessTypeOffline)
-	c.Logger.Infof("Redirecting to auth URL")
 
+	h.metricsCollector.IncAuthorizationRequested(c.OAuthApplication.Identifier)
+
+	c.Logger.Infof("Redirecting to auth URL")
 	http.Redirect(w, r, authURL, http.StatusFound)
 }
 
@@ -185,7 +191,7 @@ func (h *Handler) handleGetConfirmAuthorization(c *OAuthAppContext, w http.Respo
 		ConfirmAuthURL: fmt.Sprintf("%s/v1/%s/%s/auth/chimera/confirm?state=%s", h.baseURL, c.OAuthApplication.Provider, c.OAuthApplication.Identifier, state),
 		ProviderName:   c.OAuthApplication.Provider.DisplayName(),
 		ProviderURL:    c.OAuthApplication.Provider.HomepageURL(),
-		CancelAuthURL:  fmt.Sprintf("%s/v1/auth/chimera/cancel?state=%s", h.baseURL, state),
+		CancelAuthURL:  fmt.Sprintf("%s/v1/%s/%s/auth/chimera/cancel?state=%s", h.baseURL, c.OAuthApplication.Provider, c.OAuthApplication.Identifier, state),
 		CsrfField:      csrf.TemplateField(r),
 	}
 
@@ -217,10 +223,12 @@ func (h *Handler) handleConfirmAuthorization(c *OAuthAppContext, w http.Response
 		return
 	}
 
+	h.metricsCollector.IncAuthorizationConfirmed(c.OAuthApplication.Identifier)
+
 	http.Redirect(w, r, chimeraAuthZState.RedirectURI, http.StatusFound)
 }
 
-func (h *Handler) handleCancelAuthorization(c *Context, w http.ResponseWriter, r *http.Request) {
+func (h *Handler) handleCancelAuthorization(c *OAuthAppContext, w http.ResponseWriter, r *http.Request) {
 	c.Logger.Info("Handling request for canceling of Chimera authZ")
 
 	state := r.URL.Query().Get("state")
@@ -237,6 +245,8 @@ func (h *Handler) handleCancelAuthorization(c *Context, w http.ResponseWriter, r
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
+
+	h.metricsCollector.IncAuthorizationCanceled(c.OAuthApplication.Identifier)
 
 	c.Logger.Info("Authorization canceled")
 	http.ServeFile(w, r, h.cancelPagePath)
@@ -289,8 +299,10 @@ func (h *Handler) handleTokenExchange(c *OAuthAppContext, w http.ResponseWriter,
 		http.Error(w, "failed to exchange token", http.StatusBadGateway)
 		return
 	}
-	c.Logger.Info("Responding with access token")
 
+	h.metricsCollector.IncGeneratedToken(c.OAuthApplication.Identifier)
+
+	c.Logger.Info("Responding with access token")
 	writeJSON(w, token, &Context{Logger: logrus.New()})
 }
 
