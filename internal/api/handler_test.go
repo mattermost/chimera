@@ -178,6 +178,13 @@ func Test_HandleAuthorize(t *testing.T) {
 			"chimera_http_response_time_seconds",
 			map[string]string{"method": "GET", "path": "/v1/github/github-plugin/oauth/authorize"},
 		)
+
+		assertCounterMetric(t,
+			metricRecords,
+			"chimera_app_authorization_request_count",
+			map[string]string{"app": "github-plugin"},
+			1,
+		)
 	})
 }
 
@@ -370,7 +377,7 @@ func Test_HandleFullAuthorization(t *testing.T) {
 
 			cancelURL, err := url.Parse(authFormParams[4])
 			require.NoError(t, err)
-			assert.Equal(t, fmt.Sprintf("%s/v1/auth/chimera/cancel?state=%s", server.URL, extendedStateToken), cancelURL.String())
+			assert.Equal(t, fmt.Sprintf("%s/v1/github/github-plugin/auth/chimera/cancel?state=%s", server.URL, extendedStateToken), cancelURL.String())
 
 			csrfField := authFormParams[5]
 			csrfToken := extractCSRFToken(t, csrfField)
@@ -380,6 +387,23 @@ func Test_HandleFullAuthorization(t *testing.T) {
 			testCase.finalizationFunction(confirmURL, cancelURL, csrfToken, confirmAuthCookies)
 		})
 	}
+
+	// Requires both tests in a table to run.
+	metricRecords, err := metricsCollector.Registry.Gather()
+	require.NoError(t, err)
+
+	assertCounterMetric(t,
+		metricRecords,
+		"chimera_app_authorization_confirmations_count",
+		map[string]string{"app": "github-plugin"},
+		1,
+	)
+	assertCounterMetric(t,
+		metricRecords,
+		"chimera_app_authorization_cancellations_count",
+		map[string]string{"app": "github-plugin"},
+		1,
+	)
 }
 
 // requestChimeraAuthorization requests initial Chimera authorization and returns redirection location.
@@ -494,6 +518,12 @@ func Test_HandleExchangeToken(t *testing.T) {
 			metricRecords,
 			"chimera_http_response_time_seconds",
 			map[string]string{"method": "POST", "path": "/v1/github/github-plugin/oauth/token"},
+		)
+		assertCounterMetric(t,
+			metricRecords,
+			"chimera_app_generated_tokens_count",
+			map[string]string{"app": "github-plugin"},
+			1,
 		)
 	})
 }

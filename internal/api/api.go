@@ -47,18 +47,17 @@ func RegisterAPI(context *Context, oauthApps map[string]OAuthApp, cache StateCac
 	v1Router := rootRouter.PathPrefix("/v1").Subrouter()
 	v1Router.Use(metrics.MetricsMiddleware)
 
-	handler, err := NewHandler(cache, baseURL, cfg.ConfirmationTemplatePath, cfg.CancelPagePath)
+	handler, err := NewHandler(cache, baseURL, cfg.ConfirmationTemplatePath, cfg.CancelPagePath, metrics)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to create handler")
 	}
-
-	v1Router.Handle("/auth/chimera/cancel", csrfHandler(addCtx(context.Clone(), handler.handleCancelAuthorization))).Methods(http.MethodPost)
 
 	oauthRouter := v1Router.PathPrefix("/{provider}/{app}").Subrouter()
 	oauthRouter.Handle("/oauth/authorize", addOAuthAppCtx(context.Clone(), handler.handleAuthorize, oauthApps)).Methods(http.MethodGet)
 	oauthRouter.Handle("/oauth/complete", addOAuthAppCtx(context.Clone(), handler.handleAuthorizationCallback, oauthApps))
 	oauthRouter.Handle("/auth/chimera/confirm", csrfHandler(addOAuthAppCtx(context.Clone(), handler.handleGetConfirmAuthorization, oauthApps))).Methods(http.MethodGet)
 	oauthRouter.Handle("/auth/chimera/confirm", csrfHandler(addOAuthAppCtx(context.Clone(), handler.handleConfirmAuthorization, oauthApps))).Methods(http.MethodPost)
+	oauthRouter.Handle("/auth/chimera/cancel", csrfHandler(addOAuthAppCtx(context.Clone(), handler.handleCancelAuthorization, oauthApps))).Methods(http.MethodPost)
 	oauthRouter.Handle("/oauth/token", addOAuthAppCtx(context.Clone(), handler.handleTokenExchange, oauthApps)).Methods(http.MethodPost)
 
 	return rootRouter, nil
