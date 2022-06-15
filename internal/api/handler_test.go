@@ -372,8 +372,8 @@ func Test_HandleFullAuthorization(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, fmt.Sprintf("%s/v1/github/github-plugin/auth/chimera/confirm?state=%s", server.URL, extendedStateToken), confirmURL.String())
 
-			assert.Equal(t, fmt.Sprintf("GitHub"), authFormParams[2])
-			assert.Equal(t, fmt.Sprintf("https://github.com"), authFormParams[3])
+			assert.Equal(t, "GitHub", authFormParams[2])
+			assert.Equal(t, "https://github.com", authFormParams[3])
 
 			cancelURL, err := url.Parse(authFormParams[4])
 			require.NoError(t, err)
@@ -498,6 +498,17 @@ func Test_HandleExchangeToken(t *testing.T) {
 
 	t.Run("return 400 if missing auth code", func(t *testing.T) {
 		req, err := http.NewRequest(http.MethodPost, proxyTokenURL, nil)
+		require.NoError(t, err)
+		req.SetBasicAuth("test", "test")
+
+		_ = assertRespStatus(t, http.DefaultClient, req, http.StatusBadRequest)
+	})
+
+	t.Run("return 400 if grant type is invalid", func(t *testing.T) {
+		form := url.Values{
+			"grant_type": {"abcd"},
+		}
+		req, err := http.NewRequest(http.MethodPost, proxyTokenURL, strings.NewReader(form.Encode()))
 		require.NoError(t, err)
 		req.SetBasicAuth("test", "test")
 

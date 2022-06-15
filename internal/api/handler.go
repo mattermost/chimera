@@ -282,21 +282,55 @@ func (h *Handler) handleTokenExchange(c *OAuthAppContext, w http.ResponseWriter,
 		return
 	}
 
-	code := r.Form.Get("code")
-	if len(code) == 0 {
-		fmt.Println("Getting code from query")
-		code = r.URL.Query().Get("code")
-	}
-	if len(code) == 0 {
-		c.Logger.Error("Missing authorization code")
-		http.Error(w, "missing authorization code", http.StatusBadRequest)
-		return
+	grantType := r.Form.Get("grant_type")
+	if len(grantType) == 0 {
+		fmt.Println("Getting grant type from query")
+		grantType = r.URL.Query().Get("grant_type")
 	}
 
-	token, err := conf.Exchange(context.Background(), code)
-	if err != nil {
-		c.Logger.WithError(err).Error("Failed to exchange token")
-		http.Error(w, "failed to exchange token", http.StatusBadGateway)
+	var token *oauth2.Token
+	switch grantType {
+	case "authorization_code":
+		code := r.Form.Get("code")
+		if len(code) == 0 {
+			fmt.Println("Getting code from query")
+			code = r.URL.Query().Get("code")
+		}
+		if len(code) == 0 {
+			c.Logger.Error("Missing authorization code")
+			http.Error(w, "missing authorization code", http.StatusBadRequest)
+			return
+		}
+
+		token, err = conf.Exchange(context.Background(), code)
+		if err != nil {
+			c.Logger.WithError(err).Error("Failed to exchange token")
+			http.Error(w, "failed to exchange token", http.StatusBadGateway)
+			return
+		}
+	case "refresh_token":
+		refreshToken := r.Form.Get("refresh_token")
+		if len(refreshToken) == 0 {
+			fmt.Println("Getting refresh token from query")
+			refreshToken = r.URL.Query().Get("refresh_token")
+		}
+		if len(refreshToken) == 0 {
+			c.Logger.Error("Missing refresh token")
+			http.Error(w, "missing refresh token", http.StatusBadRequest)
+			return
+		}
+
+		token = &oauth2.Token{RefreshToken: refreshToken}
+		src := conf.TokenSource(context.Background(), token)
+		token, err = src.Token() // this actually goes and renews the tokens
+		if err != nil {
+			c.Logger.WithError(err).Error("Unable to get the new refreshed token")
+			http.Error(w, "unable to get the new refreshed token", http.StatusBadGateway)
+			return
+		}
+	default:
+		c.Logger.Error("Invalid grant type")
+		http.Error(w, "invalid grant type", http.StatusBadRequest)
 		return
 	}
 
