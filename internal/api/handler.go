@@ -287,6 +287,11 @@ func (h *Handler) handleTokenExchange(c *OAuthAppContext, w http.ResponseWriter,
 		fmt.Println("Getting grant type from query")
 		grantType = r.URL.Query().Get("grant_type")
 	}
+	if len(grantType) == 0 {
+		c.Logger.Error("Missing grant type")
+		http.Error(w, "missing grant type", http.StatusBadRequest)
+		return
+	}
 
 	var token *oauth2.Token
 	switch grantType {
