@@ -283,6 +283,11 @@ func (h *Handler) handleTokenExchange(c *OAuthAppContext, w http.ResponseWriter,
 	}
 
 	grantType := r.Form.Get("grant_type")
+	if len(grantType) == 0 {
+		fmt.Println("Getting grant type from query")
+		grantType = r.URL.Query().Get("grant_type")
+	}
+
 	var token *oauth2.Token
 	switch grantType {
 	case "authorization_code":
@@ -305,6 +310,16 @@ func (h *Handler) handleTokenExchange(c *OAuthAppContext, w http.ResponseWriter,
 		}
 	case "refresh_token":
 		refreshToken := r.Form.Get("refresh_token")
+		if len(refreshToken) == 0 {
+			fmt.Println("Getting refresh token from query")
+			refreshToken = r.URL.Query().Get("refresh_token")
+		}
+		if len(refreshToken) == 0 {
+			c.Logger.Error("Missing refresh token")
+			http.Error(w, "missing refresh token", http.StatusBadRequest)
+			return
+		}
+
 		token = &oauth2.Token{RefreshToken: refreshToken}
 		src := conf.TokenSource(context.Background(), token)
 		token, err = src.Token() // this actually goes and renews the tokens
@@ -315,7 +330,7 @@ func (h *Handler) handleTokenExchange(c *OAuthAppContext, w http.ResponseWriter,
 		}
 	default:
 		c.Logger.Error("Invalid grant type")
-		http.Error(w, "Invalid grant type", http.StatusBadRequest)
+		http.Error(w, "invalid grant type", http.StatusBadRequest)
 		return
 	}
 

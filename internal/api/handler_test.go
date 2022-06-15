@@ -504,7 +504,7 @@ func Test_HandleExchangeToken(t *testing.T) {
 		_ = assertRespStatus(t, http.DefaultClient, req, http.StatusBadRequest)
 	})
 
-	t.Run("return 400 if grant type is wrong", func(t *testing.T) {
+	t.Run("return 400 if grant type is invalid", func(t *testing.T) {
 		form := url.Values{
 			"grant_type": {"abcd"},
 		}
