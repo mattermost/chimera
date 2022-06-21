@@ -372,8 +372,8 @@ func Test_HandleFullAuthorization(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, fmt.Sprintf("%s/v1/github/github-plugin/auth/chimera/confirm?state=%s", server.URL, extendedStateToken), confirmURL.String())
 
-			assert.Equal(t, fmt.Sprintf("GitHub"), authFormParams[2])
-			assert.Equal(t, fmt.Sprintf("https://github.com"), authFormParams[3])
+			assert.Equal(t, "GitHub", authFormParams[2])
+			assert.Equal(t, "https://github.com", authFormParams[3])
 
 			cancelURL, err := url.Parse(authFormParams[4])
 			require.NoError(t, err)
@@ -504,6 +504,51 @@ func Test_HandleExchangeToken(t *testing.T) {
 		_ = assertRespStatus(t, http.DefaultClient, req, http.StatusBadRequest)
 	})
 
+	t.Run("return 400 if grant type is missing", func(t *testing.T) {
+		req, err := http.NewRequest(http.MethodPost, proxyTokenURL, nil)
+		require.NoError(t, err)
+		req.SetBasicAuth("test", "test")
+
+		_ = assertRespStatus(t, http.DefaultClient, req, http.StatusBadRequest)
+	})
+
+	t.Run("return 400 if grant type is invalid", func(t *testing.T) {
+		form := url.Values{
+			"grant_type": {"abcd"},
+		}
+		req, err := http.NewRequest(http.MethodPost, proxyTokenURL, strings.NewReader(form.Encode()))
+		req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
+		require.NoError(t, err)
+		req.SetBasicAuth("test", "test")
+
+		_ = assertRespStatus(t, http.DefaultClient, req, http.StatusBadRequest)
+	})
+
+	t.Run("return 400 if grant type is refresh_token but refresh token is missing", func(t *testing.T) {
+		form := url.Values{
+			"grant_type": {"refresh_token"},
+		}
+		req, err := http.NewRequest(http.MethodPost, proxyTokenURL, strings.NewReader(form.Encode()))
+		req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
+		require.NoError(t, err)
+		req.SetBasicAuth("test", "test")
+
+		_ = assertRespStatus(t, http.DefaultClient, req, http.StatusBadRequest)
+	})
+
+	t.Run("return 200 if grant type is refresh_token and refresh token is present", func(t *testing.T) {
+		form := url.Values{
+			"grant_type":    {"refresh_token"},
+			"refresh_token": {"randomstring"},
+		}
+		req, err := http.NewRequest(http.MethodPost, proxyTokenURL, strings.NewReader(form.Encode()))
+		req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
+		require.NoError(t, err)
+		req.SetBasicAuth("test", "test")
+
+		_ = assertRespStatus(t, http.DefaultClient, req, http.StatusOK)
+	})
+
 	t.Run("assert metrics recorded", func(t *testing.T) {
 		metricRecords, err := metricsCollector.Registry.Gather()
 		require.NoError(t, err)
@@ -512,7 +557,7 @@ func Test_HandleExchangeToken(t *testing.T) {
 			metricRecords,
 			"chimera_http_response_status",
 			map[string]string{"method": "POST", "path": "/v1/github/github-plugin/oauth/token", "status": "200"},
-			1,
+			2,
 		)
 		assertHistogramMetricObserved(t,
 			metricRecords,
@@ -523,7 +568,7 @@ func Test_HandleExchangeToken(t *testing.T) {
 			metricRecords,
 			"chimera_app_generated_tokens_count",
 			map[string]string{"app": "github-plugin"},
-			1,
+			2,
 		)
 	})
 }
