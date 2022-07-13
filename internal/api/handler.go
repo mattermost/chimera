@@ -65,6 +65,11 @@ type AuthFormData struct {
 	CsrfField      template.HTML
 }
 
+type TokenResponse struct {
+	oauth2.Token
+	ExpiresIn float64 `json:"expires_in"`
+}
+
 func (h *Handler) handleAuthorize(c *OAuthAppContext, w http.ResponseWriter, r *http.Request) {
 	c.Logger = loggerWithAppFields(c.Logger, c.OAuthApplication)
 	c.Logger.Infof("Handling authorization")
@@ -341,8 +346,17 @@ func (h *Handler) handleTokenExchange(c *OAuthAppContext, w http.ResponseWriter,
 
 	h.metricsCollector.IncGeneratedToken(c.OAuthApplication.Identifier)
 
+	expiry := token.Extra("expires_in").(float64)
+	tokenResponse := &TokenResponse{
+		ExpiresIn: expiry,
+	}
+	tokenResponse.AccessToken = token.AccessToken
+	tokenResponse.RefreshToken = token.RefreshToken
+	tokenResponse.TokenType = token.TokenType
+	tokenResponse.Expiry = token.Expiry
+
 	c.Logger.Info("Responding with access token")
-	writeJSON(w, token, &Context{Logger: logrus.New()})
+	writeJSON(w, tokenResponse, &Context{Logger: logrus.New()})
 }
 
 func (h *Handler) makeOAuthConfig(scope []string, app OAuthApp) *oauth2.Config {
