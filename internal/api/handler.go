@@ -346,14 +346,15 @@ func (h *Handler) handleTokenExchange(c *OAuthAppContext, w http.ResponseWriter,
 
 	h.metricsCollector.IncGeneratedToken(c.OAuthApplication.Identifier)
 
-	expiry := token.Extra("expires_in").(float64)
+	expiry, ok := token.Extra("expires_in").(float64)
+	if !ok {
+		c.Logger.Error(`Error in getting the "expires_in" field from the token`)
+	}
+
 	tokenResponse := &TokenResponse{
 		ExpiresIn: expiry,
+		Token:     *token,
 	}
-	tokenResponse.AccessToken = token.AccessToken
-	tokenResponse.RefreshToken = token.RefreshToken
-	tokenResponse.TokenType = token.TokenType
-	tokenResponse.Expiry = token.Expiry
 
 	c.Logger.Info("Responding with access token")
 	writeJSON(w, tokenResponse, &Context{Logger: logrus.New()})
