@@ -432,6 +432,8 @@ func (m mockOAuthURLs) Endpoint() oauth2.Endpoint {
 func (m mockOAuthURLs) RedirectURL() string { return "" }
 
 func Test_HandleExchangeToken(t *testing.T) {
+	startTime := time.Now()
+
 	mockURLs := &mockOAuthURLs{}
 
 	oauthApps := map[string]OAuthApp{
@@ -455,9 +457,19 @@ func Test_HandleExchangeToken(t *testing.T) {
 	router, err := RegisterAPI(&Context{Logger: logrus.New()}, oauthApps, cache.NewInMemoryCache(10*time.Minute), metricsCollector, cfg)
 	require.NoError(t, err)
 	router.HandleFunc("/mock-token", func(writer http.ResponseWriter, request *http.Request) {
+		resp := []byte(`{"access_token":"abcd-access-token", "expires_in": 10000, "refresh_token": "abcd-refresh"}`)
+
+		err = request.ParseForm()
+		require.NoError(t, err)
+
+		grantType := request.Form.Get("grant_type")
+		if grantType == "refresh_token" {
+			resp = []byte(`{"access_token":"refreshed-access-token", "expires_in": 1000, "refresh_token": "abcd-refresh"}`)
+		}
+
 		writer.Header().Set("Content-Type", "application/json")
 		writer.WriteHeader(http.StatusOK)
-		writer.Write([]byte(`{"access_token":"abcd-access-token"}`))
+		writer.Write(resp)
 	})
 
 	server := httptest.NewServer(router)
@@ -480,6 +492,8 @@ func Test_HandleExchangeToken(t *testing.T) {
 	token, err := oauthConfig.Exchange(context.Background(), "abcd-auth-code", oauth2.AccessTypeOffline)
 	require.NoError(t, err)
 	assert.Equal(t, "abcd-access-token", token.AccessToken)
+	assert.Equal(t, "abcd-refresh", token.RefreshToken)
+	assert.True(t, token.Expiry.Sub(startTime) >= time.Duration(10000)*time.Second) // expires_in is set to 10000, so we expect at least that much time
 
 	t.Run("return 400 if client ID and secret not provided", func(t *testing.T) {
 		oauthConfig := oauth2.Config{
@@ -537,16 +551,20 @@ func Test_HandleExchangeToken(t *testing.T) {
 	})
 
 	t.Run("return 200 if grant type is refresh_token and refresh token is present", func(t *testing.T) {
-		form := url.Values{
-			"grant_type":    {"refresh_token"},
-			"refresh_token": {"randomstring"},
-		}
-		req, err := http.NewRequest(http.MethodPost, proxyTokenURL, strings.NewReader(form.Encode()))
-		req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
-		require.NoError(t, err)
-		req.SetBasicAuth("test", "test")
+		startTime := time.Now()
 
-		_ = assertRespStatus(t, http.DefaultClient, req, http.StatusOK)
+		// Copy the token and erase AccessToken so that tokenSource.Token()
+		// actually refreshes the token.
+		tokenToRefresh := *token
+		tokenToRefresh.AccessToken = ""
+
+		tokenSrc := oauthConfig.TokenSource(context.Background(), &tokenToRefresh)
+
+		token, err = tokenSrc.Token()
+		require.NoError(t, err)
+		assert.Equal(t, "refreshed-access-token", token.AccessToken)
+		assert.Equal(t, "abcd-refresh", token.RefreshToken)
+		assert.True(t, token.Expiry.Sub(startTime) >= time.Duration(1000)*time.Second) // expires_in is set to 1000, so we expect at least that much time
 	})
 
 	t.Run("assert metrics recorded", func(t *testing.T) {
