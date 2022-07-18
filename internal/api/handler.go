@@ -174,7 +174,6 @@ func (h *Handler) handleGetConfirmAuthorization(c *OAuthAppContext, w http.Respo
 	c.Logger.Info("Handling request for confirmation of Chimera authZ")
 
 	state := r.URL.Query().Get("state")
-	fmt.Println("Handle confirm state: ", state)
 
 	chimeraAuthZState, err := h.getAuthZStateFromCache(state)
 	if err != nil {
@@ -289,7 +288,7 @@ func (h *Handler) handleTokenExchange(c *OAuthAppContext, w http.ResponseWriter,
 
 	grantType := r.Form.Get("grant_type")
 	if len(grantType) == 0 {
-		fmt.Println("Getting grant type from query")
+		c.Logger.Debug("Grant type not found in form, getting from query")
 		grantType = r.URL.Query().Get("grant_type")
 	}
 	if len(grantType) == 0 {
@@ -297,13 +296,15 @@ func (h *Handler) handleTokenExchange(c *OAuthAppContext, w http.ResponseWriter,
 		http.Error(w, "missing grant type", http.StatusBadRequest)
 		return
 	}
+	c.Logger = c.Logger.WithField("grant_type", grantType)
 
 	var token *oauth2.Token
 	switch grantType {
 	case "authorization_code":
+		c.Logger.Debug("Using authorization code for token exchange")
 		code := r.Form.Get("code")
 		if len(code) == 0 {
-			fmt.Println("Getting code from query")
+			c.Logger.Debug("Authorization code not found in form, getting from query")
 			code = r.URL.Query().Get("code")
 		}
 		if len(code) == 0 {
@@ -312,6 +313,7 @@ func (h *Handler) handleTokenExchange(c *OAuthAppContext, w http.ResponseWriter,
 			return
 		}
 
+		c.Logger.Debug("Requesting token from upstream")
 		token, err = conf.Exchange(context.Background(), code)
 		if err != nil {
 			c.Logger.WithError(err).Error("Failed to exchange token")
@@ -319,9 +321,10 @@ func (h *Handler) handleTokenExchange(c *OAuthAppContext, w http.ResponseWriter,
 			return
 		}
 	case "refresh_token":
+		c.Logger.Debug("Using refresh token for token exchange")
 		refreshToken := r.Form.Get("refresh_token")
 		if len(refreshToken) == 0 {
-			fmt.Println("Getting refresh token from query")
+			c.Logger.Debug("Refresh token not found in form, getting from query")
 			refreshToken = r.URL.Query().Get("refresh_token")
 		}
 		if len(refreshToken) == 0 {
@@ -332,6 +335,8 @@ func (h *Handler) handleTokenExchange(c *OAuthAppContext, w http.ResponseWriter,
 
 		token = &oauth2.Token{RefreshToken: refreshToken}
 		src := conf.TokenSource(context.Background(), token)
+
+		c.Logger.Debug("Refreshing token from upstream")
 		token, err = src.Token() // this actually goes and renews the tokens
 		if err != nil {
 			c.Logger.WithError(err).Error("Unable to get the new refreshed token")
