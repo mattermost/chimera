@@ -14,11 +14,10 @@ Thanks to Chimera, users can skip registration of their own OAuth2 applications 
 
 Current support for Chimera in Mattermost plugins.
 
-| Plugin | Chimera Support Status |
-|--------|---------------|
-| [GitHub Plugin](https://github.com/mattermost/mattermost-plugin-github) | In Progress |
-| [GitLab Plugin](https://github.com/mattermost/mattermost-plugin-gitlab) | In Progress |
-| [Zoom Plugin](https://github.com/mattermost/mattermost-plugin-zoom) | In Progress |
+| Plugin                                                                  | Chimera Support Status |
+|-------------------------------------------------------------------------|:----------------------:|
+| [GitHub Plugin](https://github.com/mattermost/mattermost-plugin-github) |           ✅            |
+| [GitLab Plugin](https://github.com/mattermost/mattermost-plugin-gitlab) |           ✅            |
 
 ### Using Chimera on managed instance
 
@@ -27,7 +26,7 @@ Current support for Chimera in Mattermost plugins.
 
 ### On Premise instances
 
-It is possible to use Chimera with on-premise instances but it requires a lot configuration and **is not officially supported** yet.
+It is possible to use Chimera with on-premise instances, but it requires a lot of configuration and **is not officially supported** yet.
 
 
 ## Configuration
@@ -52,7 +51,7 @@ The example shows configuration with GitHub OAuth2 application:
 
 ### Configuring with Mattermost Instance
 
-To configure Mattermost instance to use specific Chimera instance set Chimera URL in the following environment variable for the Mattermost server:
+To configure a Mattermost instance to use specific Chimera instance set Chimera URL in the following environment variable for the Mattermost server:
 ```
 export MM_PLUGINSETTINGS_CHIMERAOAUTHPROXYURL=https://your-chimera.com
 ```
