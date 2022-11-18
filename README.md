@@ -1,8 +1,10 @@
+![Chimera_Logo](https://user-images.githubusercontent.com/7295363/200433383-df069590-5177-43e0-870c-28e626ebc86a.png)
+
+> An OAuth2 proxy to external OAuth providers. 
+
 # Chimera
 
-Chimera is an OAuth2 proxy to external OAuth providers. 
-It works with predefined applications by adding credentials to the requests and proxying them to OAuth providers.
-
+Chimera works with predefined applications by adding credentials to the requests and proxying them to OAuth providers.
 
 ## Chimera at Mattermost
 
