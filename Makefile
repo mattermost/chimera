@@ -1,9 +1,10 @@
-.PHONY: build test
+.PHONY: build test build-image build-image-with-tag
 
-DOCKER_BUILDER_IMAGE = golang:1.16
+DOCKER_BUILDER_IMAGE = golang:1.20
 DOCKER_BASE_IMAGE = gcr.io/distroless/static:nonroot
 
 IMAGE ?= mattermost/chimera:test
+IMAGE_REPO ?=mattermost/chimera
 
 ################################################################################
 
@@ -12,8 +13,8 @@ PACKAGES=$(shell go list ./...)
 
 BUILD_TIME := $(shell date -u +%Y%m%d.%H%M%S)
 BUILD_HASH := $(shell git rev-parse HEAD)
-LDFLAGS += "-X github.com/mattermost/chimera.BuildHash=$(BUILD_HASH)"
-
+LDFLAGS += -X github.com/mattermost/chimera.BuildHash=$(BUILD_HASH)
+export GO111MODULE=on
 ################################################################################
 
 run-server: ## Starts Chimera server
@@ -24,14 +25,48 @@ test: ## Runs unit tests
 
 build: ## Build binary
 	@echo Building binary
-	GO111MODULE=on GOOS=linux GOARCH=amd64 CGO_ENABLED=0 $(GO) build -gcflags all=-trimpath=$(PWD) -asmflags all=-trimpath=$(PWD) -a -installsuffix cgo -o build/_output/bin/chimera -ldflags '$(LDFLAGS)' ./cmd/chimera
+	@if [ "$(ARCH)" = "amd64" ]; then \
+		export GOARCH="amd64"; \
+	elif [ "$(ARCH)" = "arm64" ]; then \
+		export GOARCH="arm64"; \
+	elif [ "$(ARCH)" = "arm" ]; then \
+		export GOARCH="arm"; \
+	else \
+		echo "Unknown architecture $(ARCH)"; \
+		exit 1; \
+	fi; \
+	GO111MODULE=on GOOS=linux CGO_ENABLED=0 $(GO) build -gcflags all=-trimpath=$(PWD) -asmflags all=-trimpath=$(PWD) -a -installsuffix cgo -o build/_output/bin/chimera -ldflags "$(LDFLAGS)" ./cmd/chimera
 
 build-image: ## Build Chimera docker image
 	@echo Building Docker image
-	docker build . -t $(IMAGE) \
-	--build-arg DOCKER_BUILDER_IMAGE=$(DOCKER_BUILDER_IMAGE) \
+	@if [ -z "$(DOCKER_USERNAME)" ] || [ -z "$(DOCKER_PASSWORD)" ]; then \
+		echo "DOCKER_USERNAME and/or DOCKER_PASSWORD not set. Skipping Docker login."; \
+	else \
+		echo $(DOCKER_PASSWORD) | docker login --username $(DOCKER_USERNAME) --password-stdin; \
+	fi
+	docker buildx build \
+	--platform linux/arm64,linux/amd64 \
+	--build-arg DOCKER_BUILD_IMAGE=$(DOCKER_BUILDER_IMAGE) \
 	--build-arg DOCKER_BASE_IMAGE=$(DOCKER_BASE_IMAGE) \
-	--no-cache
+	. -f Dockerfile -t $(IMAGE) \
+	--no-cache \
+	--push
+
+build-image-with-tag:   ## Build the docker image for the Chimera
+	@echo Building Docker Image with TAG
+	@if [ -z "$(DOCKER_USERNAME)" ] || [ -z "$(DOCKER_PASSWORD)" ]; then \
+		echo "DOCKER_USERNAME and/or DOCKER_PASSWORD not set. Skipping Docker login."; \
+	else \
+		echo $(DOCKER_PASSWORD) | docker login --username $(DOCKER_USERNAME) --password-stdin; \
+	fi
+	: $${TAG:?}
+	docker buildx build \
+	--platform linux/arm64,linux/amd64 \
+	--build-arg DOCKER_BUILD_IMAGE=$(DOCKER_BUILDER_IMAGE) \
+	--build-arg DOCKER_BASE_IMAGE=$(DOCKER_BASE_IMAGE) \
+	. -f Dockerfile -t $(IMAGE) -t $(IMAGE_REPO):${TAG} \
+	--no-cache \
+	--push
 
 check-style: gofmt govet goimports ## Runs govet and gofmt against all packages.
 	@echo Checking for style guide compliance
@@ -86,6 +121,15 @@ format: ## Formats code with go fmt and goimports
 		fi; \
 	done
 
+.PHONY: push-image-pr
+push-image-pr:
+	@echo Push Image PR
+	./scripts/push-image-pr.sh
+
+.PHONY: push-image
+push-image:
+	@echo Push Image
+	./scripts/push-image.sh
 
 get-goimports: ## Install goimports
 	$(GO) install golang.org/x/tools/cmd/goimports
