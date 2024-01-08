@@ -7,12 +7,12 @@ jobs:
   check-style:
     runs-on: ubuntu-latest
     container:
-      image: golang:1.20.0-bullseye
+      image: golang:1.21.5-bookworm
     steps:
     - name: ci/checkout-repo
-      uses: actions/checkout@ac593985615ec2ede58e132d2e21d2b1cbd6127c # v3.3.0
+      uses: actions/checkout@v4
     - name: ci/cache-gopath
-      uses: actions/cache@627f0f41f6904a5b1efbaed9f96d9eb58e92e920 # v3.2.4
+      uses: actions/cache@v3
       with:
         key: go-mod-v1-${{ hashFiles('go.sum') }}
         path: /go
@@ -23,14 +23,14 @@ jobs:
   test:
     runs-on: ubuntu-latest
     container:
-      image: golang:1.20.0-bullseye
+      image: golang:1.21.5-bookworm
     steps:
     - name: ci/checkout-repo
-      uses: actions/checkout@ac593985615ec2ede58e132d2e21d2b1cbd6127c # v3.3.0
+      uses: actions/checkout@v4
       with:
         fetch-depth: 0
     - name: ci/cache-gopath
-      uses: actions/cache@627f0f41f6904a5b1efbaed9f96d9eb58e92e920 # v3.2.4
+      uses: actions/cache@v3
       with:
         key: go-mod-v1-${{ hashFiles('go.sum') }}
         path: /go

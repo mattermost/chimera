@@ -1,6 +1,6 @@
 .PHONY: build test build-image build-image-with-tag
 
-DOCKER_BUILDER_IMAGE = golang:1.20
+DOCKER_BUILDER_IMAGE = golang:1.21
 DOCKER_BASE_IMAGE = gcr.io/distroless/static:nonroot
 
 IMAGE ?= mattermost/chimera:test
@@ -14,7 +14,6 @@ PACKAGES=$(shell go list ./...)
 BUILD_TIME := $(shell date -u +%Y%m%d.%H%M%S)
 BUILD_HASH := $(shell git rev-parse HEAD)
 LDFLAGS += -X github.com/mattermost/chimera.BuildHash=$(BUILD_HASH)
-export GO111MODULE=on
 ################################################################################
 
 run-server: ## Starts Chimera server
@@ -35,7 +34,7 @@ build: ## Build binary
 		echo "Unknown architecture $(ARCH)"; \
 		exit 1; \
 	fi; \
-	GO111MODULE=on GOOS=linux CGO_ENABLED=0 $(GO) build -gcflags all=-trimpath=$(PWD) -asmflags all=-trimpath=$(PWD) -a -installsuffix cgo -o build/_output/bin/chimera -ldflags "$(LDFLAGS)" ./cmd/chimera
+	GOOS=linux CGO_ENABLED=0 $(GO) build -gcflags all=-trimpath=$(PWD) -asmflags all=-trimpath=$(PWD) -a -installsuffix cgo -o build/_output/bin/chimera -ldflags "$(LDFLAGS)" ./cmd/chimera
 
 build-image: ## Build Chimera docker image
 	@echo Building Docker image
