@@ -1,6 +1,6 @@
 .PHONY: build test build-image build-image-with-tag
 
-DOCKER_BUILDER_IMAGE = golang:1.21
+DOCKER_BUILDER_IMAGE = golang:1.20
 DOCKER_BASE_IMAGE = gcr.io/distroless/static:nonroot
 
 IMAGE ?= mattermost/chimera:test

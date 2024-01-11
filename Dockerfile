@@ -1,4 +1,4 @@
-ARG DOCKER_BUILDER_IMAGE=golang:1.21
+ARG DOCKER_BUILDER_IMAGE=golang:1.20
 ARG DOCKER_BASE_IMAGE=gcr.io/distroless/static:nonroot
 
 FROM ${DOCKER_BUILDER_IMAGE} AS builder
