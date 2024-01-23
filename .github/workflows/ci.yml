@@ -1,0 +1,17 @@
+---
+name: ci
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  test:
+    uses: ./.github/workflows/.test.yml
+  push-docker:
+    uses: ./.github/workflows/.docker-push.yml
+    with:
+      is_pr: "${{ github.ref != 'refs/heads/main' }}"
+    secrets: inherit
+    needs: [test]

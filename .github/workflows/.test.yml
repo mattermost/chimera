@@ -1,0 +1,32 @@
+---
+name: test
+on:
+  workflow_call:
+
+
+jobs:
+  check-style:
+    runs-on: ubuntu-latest
+    container:
+      image: golang:1.20-bookworm
+    steps:
+    - name: ci/checkout-repo
+      uses: actions/checkout@v4
+    - name: ci/setup-go-and-cache
+      uses: ./.github/actions/go-setup
+    - name: ci/check-code-style
+      run: make check-style
+
+  test:
+    runs-on: ubuntu-latest
+    container:
+      image: golang:1.20-bookworm
+    steps:
+    - name: ci/checkout-repo
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    - name: ci/setup-go-and-cache
+      uses: ./.github/actions/go-setup
+    - name: ci/test
+      run: make test
