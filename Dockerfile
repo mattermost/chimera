@@ -1,28 +1,19 @@
 ARG DOCKER_BUILDER_IMAGE=golang:1.20
 ARG DOCKER_BASE_IMAGE=gcr.io/distroless/static:nonroot
 
-FROM ${DOCKER_BUILDER_IMAGE} AS builder
-
+FROM --platform=${TARGETPLATFORM} ${DOCKER_BUILDER_IMAGE} AS builder
+ARG TARGETARCH
 WORKDIR /chimera
 
 COPY go.mod go.sum ./
 RUN go mod download && go mod verify
 
 COPY . .
+ENV ARCH=${TARGETARCH}
 
-# Detect architecture and set ARCH
-RUN ARCH=$(uname -m) && \
-    if [ "$ARCH" = "x86_64" ]; then \
-        ARCH="amd64"; \
-    elif [ "$ARCH" = "aarch64" ]; then \
-        ARCH="arm64"; \
-    elif [ "$ARCH" = "armv7l" ] || [ "$ARCH" = "armv6l" ]; then \
-        ARCH="arm"; \
-    fi && \
-    echo "ARCH=$ARCH" && \
-    make build ARCH=$ARCH
+RUN make build ARCH=${ARCH}
 
-FROM ${DOCKER_BASE_IMAGE}
+FROM --platform=${TARGETPLATFORM} ${DOCKER_BASE_IMAGE}
 
 WORKDIR /
 COPY --from=builder /chimera/LICENSE .
