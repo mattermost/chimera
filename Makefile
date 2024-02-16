@@ -63,7 +63,7 @@ build-image-with-tag:   ## Build the docker image for the Chimera
 	--platform linux/arm64,linux/amd64 \
 	--build-arg DOCKER_BUILD_IMAGE=$(DOCKER_BUILDER_IMAGE) \
 	--build-arg DOCKER_BASE_IMAGE=$(DOCKER_BASE_IMAGE) \
-	. -f Dockerfile -t $(IMAGE) -t $(IMAGE_REPO):${TAG} \
+	. -f Dockerfile -t $(IMAGE) -t $(IMAGE_REPO):${TAG} -t $(IMAGE_REPO):test-${BUILD_TIME} \
 	--no-cache \
 	--push
 
