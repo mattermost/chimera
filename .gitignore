@@ -1,5 +1,5 @@
 /.idea
 /.vscode
 /apps-config.json
-
+bin/
 /build/_output

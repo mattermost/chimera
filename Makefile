@@ -1,6 +1,6 @@
 .PHONY: build test build-image build-image-with-tag
 
-DOCKER_BUILDER_IMAGE = golang:1.20
+DOCKER_BUILDER_IMAGE = golang:1.21
 DOCKER_BASE_IMAGE = gcr.io/distroless/static:nonroot
 
 IMAGE ?= mattermost/chimera:test
@@ -9,11 +9,19 @@ IMAGE_REPO ?=mattermost/chimera
 ################################################################################
 
 GO ?= $(shell command -v go 2> /dev/null)
+GO_INSTALL = ./scripts/go_install.sh
 PACKAGES=$(shell go list ./...)
+TOOLS_BIN_DIR := $(abspath bin)
+
+ARCH ?= amd64
 
 BUILD_TIME := $(shell date -u +%Y%m%d.%H%M%S)
 BUILD_HASH := $(shell git rev-parse HEAD)
 LDFLAGS += -X github.com/mattermost/chimera.BuildHash=$(BUILD_HASH)
+
+OUTDATED_VER := master
+OUTDATED_BIN := go-mod-outdated
+OUTDATED_GEN := $(TOOLS_BIN_DIR)/$(OUTDATED_BIN)
 ################################################################################
 
 run-server: ## Starts Chimera server
@@ -36,6 +44,7 @@ build: ## Build binary
 	fi; \
 	GOOS=linux CGO_ENABLED=0 $(GO) build -gcflags all=-trimpath=$(PWD) -asmflags all=-trimpath=$(PWD) -a -installsuffix cgo -o build/_output/bin/chimera -ldflags "$(LDFLAGS)" ./cmd/chimera
 
+.PHONY: build-image
 build-image: ## Build Chimera docker image
 	@echo Building Docker image
 	@if [ -z "$(DOCKER_USERNAME)" ] || [ -z "$(DOCKER_PASSWORD)" ]; then \
@@ -51,6 +60,22 @@ build-image: ## Build Chimera docker image
 	--no-cache \
 	--push
 
+.PHONY: build-image-locally
+build-image-locally: ## Build Chimera docker image
+	@echo Building Docker image
+	@if [ -z "$(DOCKER_USERNAME)" ] || [ -z "$(DOCKER_PASSWORD)" ]; then \
+		echo "DOCKER_USERNAME and/or DOCKER_PASSWORD not set. Skipping Docker login."; \
+	else \
+		echo $(DOCKER_PASSWORD) | docker login --username $(DOCKER_USERNAME) --password-stdin; \
+	fi
+	docker buildx build \
+	--platform linux/arm64 \
+	--build-arg DOCKER_BUILD_IMAGE=$(DOCKER_BUILDER_IMAGE) \
+	--build-arg DOCKER_BASE_IMAGE=$(DOCKER_BASE_IMAGE) \
+	. -f Dockerfile -t $(IMAGE) \
+	--no-cache \
+	--load
+.PHONY: build-image-with-tag
 build-image-with-tag:   ## Build the docker image for the Chimera
 	@echo Building Docker Image with TAG
 	@if [ -z "$(DOCKER_USERNAME)" ] || [ -z "$(DOCKER_PASSWORD)" ]; then \
@@ -130,9 +155,26 @@ push-image:
 	@echo Push Image
 	./scripts/push-image.sh
 
+.PHONY: get-goimports
 get-goimports: ## Install goimports
 	$(GO) install golang.org/x/tools/cmd/goimports
 
+.PHONY: check-modules
+check-modules: $(OUTDATED_GEN) ## Check outdated modules
+	@echo Checking outdated modules
+	$(GO) list -mod=mod -u -m -json all | $(OUTDATED_GEN) -update -direct
+
+.PHONY: scan
+scan:
+	docker scout cves ${IMAGE}
+
 ## Help documentation à la https://marmelab.com/blog/2016/02/29/auto-documented-makefile.html
+.PHONY: help
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' ./Makefile | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-30s\033[0m %s\n", $$1, $$2}'
+
+## --------------------------------------
+## Tooling Binaries
+## --------------------------------------
+$(OUTDATED_GEN): ## Build go-mod-outdated.
+	GOBIN=$(TOOLS_BIN_DIR) $(GO_INSTALL) github.com/psampaz/go-mod-outdated $(OUTDATED_BIN) $(OUTDATED_VER)
