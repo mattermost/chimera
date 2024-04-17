@@ -117,22 +117,6 @@ govet: ## Runs govet against all packages.
 	$(GO) vet ./...
 	@echo Govet success
 
-#goimports: get-goimports ## Runs goimports against all packages.
-#	@echo Checking imports are sorted
-#	@for package in $(PACKAGES); do \
-#		echo "Checking "$$package; \
-#		files=$$(go list -f '{{range .GoFiles}}{{$$.Dir}}/{{.}} {{end}}' $$package); \
-#		if [ "$$files" ]; then \
-#			goimports_output=$$(goimports -d $$files 2>&1); \
-#			if [ "$$goimports_output" ]; then \
-#				echo "$$goimports_output"; \
-#				echo "goimports failure"; \
-#				exit 1; \
-#			fi; \
-#		fi; \
-#	done
-#	@echo "goimports success"; \
-
 format: ## Formats code with go fmt and goimports
 	@echo Running go fmt
 	$(GO) fmt ./...
