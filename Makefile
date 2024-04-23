@@ -152,6 +152,32 @@ check-modules: $(OUTDATED_GEN) ## Check outdated modules
 scan:
 	docker scout cves ${IMAGE}
 
+# Draft a release
+.PHONY: release
+release:
+	@if [[ -z "${NEXT_VER}" ]]; then \
+		echo "Error: NEXT_VER must be defined, e.g. \"make release NEXT_VER=v1.0.1\""; \
+		exit -1; \
+	else \
+		if [[ "${TAG_EXISTS}" -eq 0 ]]; then \
+		  echo "Error: tag ${NEXT_VER} already exists"; \
+			exit -1; \
+		else \
+			if ! [ -x "$$(command -v goreleaser)" ]; then \
+			echo "goreleaser is not installed, do you want to download it? [y/N] " && read ans && [ $${ans:-N} = y ]; \
+				if [ $$ans = y ] || [ $$ans = Y ]  ; then \
+					curl -sfL https://install.goreleaser.com/github.com/goreleaser/goreleaser.sh | sh; \
+				else \
+					echo "aborting make release."; \
+					exit -1; \
+				fi; \
+			fi; \
+			git commit -a -m 'Releasing $(NEXT_VER)'; \
+			git tag $(NEXT_VER); \
+			goreleaser --rm-dist; \
+		fi; \
+	fi;\
+
 ## Help documentation à la https://marmelab.com/blog/2016/02/29/auto-documented-makefile.html
 .PHONY: help
 help:
