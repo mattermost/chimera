@@ -1,0 +1,30 @@
+---
+name: release
+on:
+  push:
+    tags:
+    - v[0-9]+.[0-9]+.[0-9]+*
+
+jobs:
+  test:
+    uses: ./.github/workflows/.test.yml
+  push-docker:
+    uses: ./.github/workflows/.docker-push.yml
+    with:
+      is_pr: false
+    secrets: inherit
+    needs: [test]
+  release:
+    runs-on: ubuntu-latest
+    container:
+      image: golang:1.22.0-bookworm
+    env:
+      GITHUB_TOKEN: "${{ secrets.GH_TOKEN }}"
+    steps:
+    - name: ci/checkout-repo
+      uses: actions/checkout@ac593985615ec2ede58e132d2e21d2b1cbd6127c # v3.3.0
+    - name: Set tag environment variable
+      run: echo "NEXT_VER=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
+    - name: ci/publish-release
+      run: make release
+    needs: [push-docker]
